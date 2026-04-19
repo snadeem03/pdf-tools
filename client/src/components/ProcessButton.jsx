@@ -9,17 +9,11 @@ export default function ProcessButton({ onClick, processing, progress, downloadU
         <button
           onClick={onClick}
           disabled={disabled || processing}
-          className="w-full py-4 rounded-2xl text-white font-semibold text-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full py-4 rounded font-semibold text-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           style={{
-            background: disabled || processing
-              ? '#94a3b8'
-              : 'linear-gradient(135deg, var(--color-primary), var(--color-primary-light))',
-            boxShadow: disabled || processing ? 'none' : '0 8px 25px rgba(79, 70, 229, 0.3)',
+            backgroundColor: 'var(--color-primary)',
+            color: 'white',
           }}
-          onMouseEnter={(e) => {
-            if (!disabled && !processing) e.target.style.transform = 'translateY(-2px)';
-          }}
-          onMouseLeave={(e) => { e.target.style.transform = 'translateY(0)'; }}
         >
           {processing ? (
             <span className="flex items-center justify-center gap-3">
@@ -35,8 +29,8 @@ export default function ProcessButton({ onClick, processing, progress, downloadU
 
       {/* Progress Bar */}
       {processing && (
-        <div className="progress-bar">
-          <div className="progress-bar-fill animate-shimmer" style={{ width: `${progress}%` }} />
+        <div className="progress-bar mt-2">
+          <div className="progress-bar-fill" style={{ width: `${progress}%` }} />
         </div>
       )}
 
@@ -45,15 +39,13 @@ export default function ProcessButton({ onClick, processing, progress, downloadU
         <a
           href={downloadUrl}
           download={downloadName}
-          className="block w-full py-4 rounded-2xl text-white font-semibold text-lg text-center transition-all duration-300"
+          className="block w-full py-4 rounded font-semibold text-lg text-center hover:opacity-90"
           style={{
-            background: 'linear-gradient(135deg, #10b981, #34d399)',
-            boxShadow: '0 8px 25px rgba(16, 185, 129, 0.3)',
+            backgroundColor: 'var(--color-primary)',
+            color: 'white',
           }}
-          onMouseEnter={(e) => { e.target.style.transform = 'translateY(-2px)'; }}
-          onMouseLeave={(e) => { e.target.style.transform = 'translateY(0)'; }}
         >
-          ⬇ Download Result
+          Download Result
         </a>
       )}
     </div>

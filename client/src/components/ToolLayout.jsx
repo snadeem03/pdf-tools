@@ -10,19 +10,17 @@ export default function ToolLayout({ title, description, color, icon, children }
       {/* Back link */}
       <Link
         to="/"
-        className="inline-flex items-center gap-2 text-sm font-medium mb-8 transition-colors"
+        className="inline-flex items-center gap-2 text-sm font-medium mb-8 hover:underline"
         style={{ color: 'var(--color-text-secondary)' }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-primary)')}
-        onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-secondary)')}
       >
         ← Back to all tools
       </Link>
 
       {/* Header */}
-      <div className="flex items-center gap-4 mb-8 animate-fade-in-up">
+      <div className="flex items-center gap-4 mb-8">
         <div
-          className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-lg"
-          style={{ background: `linear-gradient(135deg, ${color}20, ${color}40)` }}
+          className="w-14 h-14 rounded flex items-center justify-center text-2xl"
+          style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
         >
           {icon}
         </div>
@@ -33,7 +31,7 @@ export default function ToolLayout({ title, description, color, icon, children }
       </div>
 
       {/* Content */}
-      <div className="animate-fade-in-up" style={{ animationDelay: '100ms' }}>
+      <div className="simple-card p-6 sm:p-8">
         {children}
       </div>
     </div>

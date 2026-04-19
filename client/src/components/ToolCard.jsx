@@ -4,13 +4,11 @@ export default function ToolCard({ title, description, icon, path, color, delay 
   return (
     <Link
       to={path}
-      className="glass-card p-6 flex flex-col items-center text-center gap-3 cursor-pointer animate-fade-in-up group"
-      style={{ animationDelay: `${delay}ms` }}
+      className="simple-card p-6 flex flex-col items-center text-center gap-3 cursor-pointer group"
     >
       {/* Icon circle */}
       <div
-        className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl shadow-lg transition-transform duration-300 group-hover:scale-110"
-        style={{ background: `linear-gradient(135deg, ${color}20, ${color}40)` }}
+        className="w-16 h-16 rounded-lg flex items-center justify-center text-3xl"
       >
         {icon}
       </div>
@@ -27,8 +25,8 @@ export default function ToolCard({ title, description, icon, path, color, delay 
 
       {/* Arrow indicator */}
       <span
-        className="text-xs font-medium mt-auto pt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-        style={{ color: color }}
+        className="text-sm font-medium mt-auto pt-2"
+        style={{ color: 'var(--color-primary)' }}
       >
         Use Tool →
       </span>

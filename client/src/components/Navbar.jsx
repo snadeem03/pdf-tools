@@ -7,9 +7,9 @@ export default function Navbar() {
 
   return (
     <nav
-      className="sticky top-0 z-50 backdrop-blur-xl border-b"
+      className="sticky top-0 z-50 border-b"
       style={{
-        backgroundColor: darkMode ? 'rgba(15, 23, 42, 0.85)' : 'rgba(248, 250, 252, 0.85)',
+        backgroundColor: 'var(--color-surface)',
         borderColor: 'var(--color-border)',
       }}
     >
@@ -18,8 +18,8 @@ export default function Navbar() {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-3 group">
             <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-lg"
-              style={{ background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-light))' }}
+              className="w-9 h-9 rounded flex items-center justify-center text-white font-bold text-sm"
+              style={{ backgroundColor: 'var(--color-primary)' }}
             >
               PDF
             </div>
@@ -32,10 +32,8 @@ export default function Navbar() {
           <div className="flex items-center gap-4">
             <Link
               to="/"
-              className="text-sm font-medium px-3 py-2 rounded-lg transition-colors"
-              style={{ color: 'var(--color-text-secondary)' }}
-              onMouseEnter={(e) => (e.target.style.color = 'var(--color-primary)')}
-              onMouseLeave={(e) => (e.target.style.color = 'var(--color-text-secondary)')}
+              className="text-sm font-medium px-3 py-2 rounded transition-colors hover:bg-gray-100 dark:hover:bg-gray-800"
+              style={{ color: 'var(--color-text)' }}
             >
               All Tools
             </Link>

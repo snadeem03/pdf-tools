@@ -17,15 +17,9 @@ export default function Home() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
       {/* Hero Section */}
-      <div className="text-center mb-16 animate-fade-in-up">
-        <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight mb-4">
-          Every tool you need to{' '}
-          <span
-            className="bg-clip-text text-transparent"
-            style={{ backgroundImage: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-light))' }}
-          >
-            work with PDFs
-          </span>
+      <div className="text-center mb-16 mt-8">
+        <h1 className="text-4xl sm:text-5xl font-bold mb-4" style={{ color: 'var(--color-text)' }}>
+          Every tool you need to work with PDFs
         </h1>
         <p className="text-xl max-w-2xl mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
           Merge, split, compress, convert, rotate, watermark and much more.
@@ -41,7 +35,7 @@ export default function Home() {
       </div>
 
       {/* Trust Section */}
-      <div className="mt-20 text-center animate-fade-in-up" style={{ animationDelay: '600ms' }}>
+      <div className="mt-20 text-center">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 max-w-3xl mx-auto">
           {[
             { icon: '🔒', title: 'Secure', desc: 'Files are processed on our server and deleted immediately' },

@@ -70,10 +70,9 @@ export default function FileUpload({ accept = '.pdf', multiple = false, onFilesS
 
         {/* Upload Icon */}
         <div
-          className="w-20 h-20 rounded-full flex items-center justify-center mb-4 transition-transform duration-300"
+          className="w-20 h-20 rounded-full flex items-center justify-center mb-4 transition-colors"
           style={{
-            background: 'linear-gradient(135deg, var(--color-primary), var(--color-primary-light))',
-            transform: isDragActive ? 'scale(1.1)' : 'scale(1)',
+            backgroundColor: isDragActive ? 'var(--color-primary-light)' : 'var(--color-primary)',
           }}
         >
           <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -93,8 +92,7 @@ export default function FileUpload({ accept = '.pdf', multiple = false, onFilesS
           {selectedFiles.map((file, idx) => (
             <div
               key={idx}
-              className="flex items-center justify-between px-4 py-3 rounded-xl animate-fade-in-up"
-              style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+              className="flex items-center justify-between px-4 py-3 simple-card"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <span className="text-2xl flex-shrink-0">📄</span>
