@@ -32,13 +32,13 @@ export default function WordToPdf() {
 
   return (
     <ToolLayout title="Word to PDF" description="Convert Word documents to PDF format" color="#dc2626" icon="📄">
-      <FileUpload accept=".docx,.doc" onFilesSelected={setFiles} label="Drop a Word document here" />
+      <FileUpload accept=".docx,.doc" onUpload={setFiles} label="Drop a Word document here" />
       <ProcessButton
         onClick={handleProcess}
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName="converted.pdf"
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + "-converted.pdf" : "converted.pdf"}
         label="Convert to PDF"
         disabled={files.length === 0}
       />

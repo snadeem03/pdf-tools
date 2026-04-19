@@ -32,13 +32,13 @@ export default function PdfToWord() {
 
   return (
     <ToolLayout title="PDF to Word" description="Convert PDF documents to editable DOCX format" color="#2563eb" icon="📝">
-      <FileUpload accept=".pdf" onFilesSelected={setFiles} label="Drop a PDF file here" />
+      <FileUpload accept=".pdf" onUpload={setFiles} label="Drop a PDF file here" />
       <ProcessButton
         onClick={handleProcess}
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName="converted.docx"
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + "-converted.docx" : "converted.docx"}
         label="Convert to Word"
         disabled={files.length === 0}
       />

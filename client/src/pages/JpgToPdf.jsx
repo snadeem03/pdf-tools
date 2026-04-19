@@ -37,13 +37,13 @@ export default function JpgToPdf() {
 
   return (
     <ToolLayout title="JPG to PDF" description="Convert images (JPG, PNG) into a single PDF" color="#ea580c" icon="🖼️">
-      <FileUpload accept="image/*" multiple onFilesSelected={handleFilesSelected} label="Drop images here" maxFiles={50} />
+      <FileUpload accept="image/*" multiple onUpload={handleFilesSelected} label="Drop images here" maxFiles={50} />
       <ProcessButton
         onClick={handleProcess}
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName="images.pdf"
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + "-images.pdf" : "images.pdf"}
         label="Convert to PDF"
         disabled={files.length === 0}
       />

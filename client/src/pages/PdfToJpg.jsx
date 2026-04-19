@@ -32,13 +32,13 @@ export default function PdfToJpg() {
 
   return (
     <ToolLayout title="PDF to JPG" description="Convert each PDF page into a JPG image (ZIP download)" color="#16a34a" icon="📸">
-      <FileUpload accept=".pdf" onFilesSelected={setFiles} label="Drop a PDF file here" />
+      <FileUpload accept=".pdf" onUpload={setFiles} label="Drop a PDF file here" />
       <ProcessButton
         onClick={handleProcess}
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName="pdf-images.zip"
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + "-pdf-images.zip" : "pdf-images.zip"}
         label="Convert to JPG"
         disabled={files.length === 0}
       />

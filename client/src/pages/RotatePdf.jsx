@@ -37,7 +37,7 @@ export default function RotatePdf() {
 
   return (
     <ToolLayout title="Rotate PDF" description="Rotate pages to any orientation" color="#ca8a04" icon="🔄">
-      <FileUpload accept=".pdf" onFilesSelected={setFiles} label="Drop a PDF file here" />
+      <FileUpload accept=".pdf" onUpload={setFiles} label="Drop a PDF file here" />
 
       {files.length > 0 && (
         <div className="mt-6 space-y-4">
@@ -100,7 +100,7 @@ export default function RotatePdf() {
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName="rotated.pdf"
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + "-rotated.pdf" : "rotated.pdf"}
         label="Rotate PDF"
         disabled={files.length === 0}
       />

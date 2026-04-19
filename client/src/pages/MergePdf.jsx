@@ -86,7 +86,7 @@ export default function MergePdf() {
 
   return (
     <ToolLayout title="Merge PDF" description="Combine multiple PDF files into one. Drag to reorder." color="#4f46e5" icon="🔗">
-      <FileUpload accept=".pdf" multiple onFilesSelected={handleFilesSelected} label="Drop PDF files here" maxFiles={20} />
+      <FileUpload accept=".pdf" multiple onUpload={handleFilesSelected} label="Drop PDF files here" maxFiles={20} />
 
       {files.length > 1 && (
         <div className="mt-6">
@@ -110,7 +110,7 @@ export default function MergePdf() {
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName="merged.pdf"
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + "-merged.pdf" : "merged.pdf"}
         label="Merge PDFs"
         disabled={files.length < 2}
       />

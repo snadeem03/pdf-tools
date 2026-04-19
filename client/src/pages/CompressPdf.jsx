@@ -42,7 +42,7 @@ export default function CompressPdf() {
 
   return (
     <ToolLayout title="Compress PDF" description="Reduce PDF file size while maintaining quality" color="#0891b2" icon="📦">
-      <FileUpload accept=".pdf" onFilesSelected={setFiles} label="Drop a PDF file here" />
+      <FileUpload accept=".pdf" onUpload={setFiles} label="Drop a PDF file here" />
 
       {stats && (
         <div className="mt-6 grid grid-cols-3 gap-4">
@@ -64,7 +64,7 @@ export default function CompressPdf() {
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName="compressed.pdf"
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + "-compressed.pdf" : "compressed.pdf"}
         label="Compress PDF"
         disabled={files.length === 0}
       />

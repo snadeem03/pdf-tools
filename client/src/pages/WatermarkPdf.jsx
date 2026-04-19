@@ -57,7 +57,7 @@ export default function WatermarkPdf() {
 
   return (
     <ToolLayout title="Add Watermark" description="Add custom text watermark to your PDF pages" color="#6366f1" icon="💧">
-      <FileUpload accept=".pdf" onFilesSelected={setFiles} label="Drop a PDF file here" />
+      <FileUpload accept=".pdf" onUpload={setFiles} label="Drop a PDF file here" />
 
       {files.length > 0 && (
         <div className="mt-6 space-y-5">
@@ -124,7 +124,7 @@ export default function WatermarkPdf() {
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName="watermarked.pdf"
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + "-watermarked.pdf" : "watermarked.pdf"}
         label="Add Watermark"
         disabled={files.length === 0}
       />

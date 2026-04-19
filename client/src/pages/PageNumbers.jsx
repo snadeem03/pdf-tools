@@ -55,7 +55,7 @@ export default function PageNumbers() {
 
   return (
     <ToolLayout title="Page Numbers" description="Add page numbers to your PDF document" color="#9333ea" icon="🔢">
-      <FileUpload accept=".pdf" onFilesSelected={setFiles} label="Drop a PDF file here" />
+      <FileUpload accept=".pdf" onUpload={setFiles} label="Drop a PDF file here" />
 
       {files.length > 0 && (
         <div className="mt-6 space-y-5">
@@ -127,7 +127,7 @@ export default function PageNumbers() {
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName="numbered.pdf"
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + "-numbered.pdf" : "numbered.pdf"}
         label="Add Page Numbers"
         disabled={files.length === 0}
       />

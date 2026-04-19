@@ -38,7 +38,7 @@ export default function SplitPdf() {
 
   return (
     <ToolLayout title="Split PDF" description="Separate pages or extract specific page ranges" color="#7c3aed" icon="✂️">
-      <FileUpload accept=".pdf" onFilesSelected={setFiles} label="Drop a PDF file here" />
+      <FileUpload accept=".pdf" onUpload={setFiles} label="Drop a PDF file here" />
 
       {files.length > 0 && (
         <div className="mt-6 space-y-4">
@@ -82,7 +82,7 @@ export default function SplitPdf() {
         processing={processing}
         progress={progress}
         downloadUrl={downloadUrl}
-        downloadName={mode === 'all' ? 'split-pages.zip' : 'split.pdf'}
+        downloadName={files.length > 0 ? files[0].name.replace(/\.[^/.]+$/, "") + (mode === 'all' ? '-split-pages.zip' : '-split.pdf') : (mode === 'all' ? 'split-pages.zip' : 'split.pdf')}
         label="Split PDF"
         disabled={files.length === 0}
       />
