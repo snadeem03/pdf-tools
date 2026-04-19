@@ -66,6 +66,7 @@ app.use('/api/jpg-to-pdf', optionalAuth, require('./routes/jpgToPdf'));
 app.use('/api/pdf-to-jpg', optionalAuth, require('./routes/pdfToJpg'));
 app.use('/api/rotate', optionalAuth, require('./routes/rotate'));
 app.use('/api/watermark', optionalAuth, require('./routes/watermark'));
+app.use('/api/remove-watermark', optionalAuth, require('./routes/removeWatermark'));
 app.use('/api/page-numbers', optionalAuth, require('./routes/pageNumbers'));
 app.use('/api/ocr', optionalAuth, require('./routes/ocr'));
 app.use('/api/flatten', optionalAuth, require('./routes/flatten'));
@@ -75,7 +76,7 @@ app.use('/api/auth', require('./routes/auth'));
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ success: true, message: 'PDF Tools API is running', timestamp: new Date().toISOString() });
+  res.json({ success: true, message: 'PDFNova API is running', timestamp: new Date().toISOString() });
 });
 
 // =============================================================================
@@ -89,8 +90,8 @@ app.use(errorHandler);
 sequelize.sync({ alter: true }).then(() => {
   logger.info('SQLite Database Synced');
   app.listen(PORT, () => {
-    logger.info(`PDF Tools API server running on port ${PORT}`);
-    console.log(`🚀 PDF Tools API server running at http://localhost:${PORT}`);
+    logger.info(`PDFNova API server running on port ${PORT}`);
+    console.log(`🚀 PDFNova API server running at http://localhost:${PORT}`);
   });
 }).catch(err => {
   logger.error(`Database sync failed: ${err.message}`);

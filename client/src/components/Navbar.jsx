@@ -30,7 +30,7 @@ export default function Navbar() {
               PDF
             </div>
             <span className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-              iLove<span style={{ color: 'var(--color-primary)' }}>PDF</span> Clone
+              PDF<span style={{ color: 'var(--color-primary)' }}>Nova</span>
             </span>
           </Link>
 

@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-const API_BASE = '/api';
+const api = axios.create({
+  baseURL: '/api'
+});
 
 /**
  * Generic file processing API call.
@@ -10,7 +12,7 @@ const API_BASE = '/api';
  * @returns {Promise<{blob: Blob, filename: string, headers: object}>}
  */
 export async function processFiles(endpoint, formData, onProgress) {
-  const response = await axios.post(`${API_BASE}${endpoint}`, formData, {
+  const response = await api.post(endpoint, formData, {
     responseType: 'blob',
     onUploadProgress: (e) => {
       if (e.total) {
@@ -38,3 +40,5 @@ export async function processFiles(endpoint, formData, onProgress) {
 
   return { blob: response.data, filename, headers: response.headers };
 }
+
+export default api;

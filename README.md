@@ -1,6 +1,6 @@
-# PDF Tools — All-in-one PDF Toolkit
+# 📄 PDFNova
 
-A production-ready web application similar to iLovePDF with 10 fully functional PDF tools.
+A blazingly fast, production-ready, open-source PDF manipulation toolkit engineered with a gorgeous glassmorphic UI. Process files flawlessly without limits, natively on your machine or deploy it to the cloud via Docker.
 
 ## Features
 

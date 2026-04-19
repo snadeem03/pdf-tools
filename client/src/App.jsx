@@ -19,6 +19,7 @@ import Dashboard from './pages/Dashboard';
 import OcrPdf from './pages/OcrPdf';
 import FlattenPdf from './pages/FlattenPdf';
 import SignPdf from './pages/SignPdf';
+import RemoveWatermarkPdf from './pages/RemoveWatermarkPdf';
 
 export const ThemeContext = createContext();
 
@@ -65,6 +66,7 @@ export default function App() {
                 <Route path="/ocr" element={<OcrPdf />} />
                 <Route path="/flatten" element={<FlattenPdf />} />
                 <Route path="/sign" element={<SignPdf />} />
+                <Route path="/remove-watermark" element={<RemoveWatermarkPdf />} />
                 {/* Fallback */}
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

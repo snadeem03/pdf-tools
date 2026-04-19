@@ -23,9 +23,9 @@ exports.compressPdf = async (req, res, next) => {
     pdfDoc.setTitle('');
     pdfDoc.setAuthor('');
     pdfDoc.setSubject('');
-    pdfDoc.setKeywords([]);
-    pdfDoc.setProducer('PDF Tools');
-    pdfDoc.setCreator('PDF Tools');
+    pdfDoc.setTitle('Compressed PDF');
+    pdfDoc.setProducer('PDFNova');
+    pdfDoc.setCreator('PDFNova');
 
     // Save with object streams for better compression
     const compressedBytes = await pdfDoc.save({

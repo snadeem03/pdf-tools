@@ -14,6 +14,7 @@ const tools = [
   { title: 'OCR to Text', description: 'Extract text from scanned PDFs & images', icon: '👁️', path: '/ocr' },
   { title: 'Flatten PDF', description: 'Make form fields read-only and flat', icon: '🔨', path: '/flatten' },
   { title: 'Sign PDF', description: 'e-Sign your document with an image', icon: '✍️', path: '/sign' },
+  { title: 'Remove Watermark', description: 'Erase, censor, or cleanly crop out watermarks from PDFs', icon: '🧼', path: '/remove-watermark' },
 ];
 
 export default function Home() {

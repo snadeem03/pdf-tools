@@ -8,7 +8,7 @@ const resources = {
   en: {
     translation: {
       "app": {
-        "title": "PDF Tools",
+        "title": "PDFNova",
         "tagline": "Every tool you need to work with PDFs in one place",
         "description": "All are 100% FREE and easy to use! Merge, split, compress, convert, rotate, unlock and watermark PDFs with just a few clicks.",
         "allTools": "All Tools",
@@ -27,7 +27,7 @@ const resources = {
   es: {
     translation: {
       "app": {
-        "title": "Herramientas PDF",
+        "title": "PDFNova",
         "tagline": "Todas las herramientas necesarias para usar PDFs en tu alcance",
         "description": "¡Todas son 100% GRATUITAS y fáciles de usar! Une, divide, comprime, convierte, gira, desbloquea y añade marcas de agua a tus PDFs con solo unos pocos clics.",
         "allTools": "Todas las Herramientas",
@@ -45,7 +45,7 @@ const resources = {
   hi: {
     translation: {
       "app": {
-        "title": "PDF उपकरण",
+        "title": "PDFNova",
         "tagline": "PDF के साथ काम करने के लिए आवश्यक हर उपकरण एक जगह पर",
         "description": "सभी 100% मुफ़्त और उपयोग में आसान हैं! बस कुछ ही क्लिक से PDF को मर्ज करें, विभाजित करें, कंप्रेस करें, कन्वर्ट करें, घुमाएं, अनलॉक करें और वॉटरमार्क जोड़ें।",
         "allTools": "सभी उपकरण",

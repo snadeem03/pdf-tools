@@ -1,4 +1,5 @@
 import { useState, useContext } from 'react';
+import { createPortal } from 'react-dom';
 import { AuthContext } from '../AuthContext';
 
 export default function AuthModal({ isOpen, onClose }) {
@@ -30,7 +31,7 @@ export default function AuthModal({ isOpen, onClose }) {
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm">
       <div className="glass-card w-full max-w-md p-8 relative animate-fade-in-up">
         {/* Close Button */}
@@ -78,6 +79,7 @@ export default function AuthModal({ isOpen, onClose }) {
           </button>
         </p>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
