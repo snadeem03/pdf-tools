@@ -9,6 +9,10 @@ const logger = require('./utils/logger');
 const errorHandler = require('./utils/errorHandler');
 const { startCleanupJob } = require('./utils/cleanup');
 
+const sequelize = require('./config/database');
+const optionalAuth = require('./utils/optionalAuth');
+require('./utils/historyTracker');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -53,16 +57,21 @@ const logsDir = path.join(__dirname, 'logs');
 // =============================================================================
 // API Routes
 // =============================================================================
-app.use('/api/merge', require('./routes/merge'));
-app.use('/api/split', require('./routes/split'));
-app.use('/api/compress', require('./routes/compress'));
-app.use('/api/pdf-to-word', require('./routes/pdfToWord'));
-app.use('/api/word-to-pdf', require('./routes/wordToPdf'));
-app.use('/api/jpg-to-pdf', require('./routes/jpgToPdf'));
-app.use('/api/pdf-to-jpg', require('./routes/pdfToJpg'));
-app.use('/api/rotate', require('./routes/rotate'));
-app.use('/api/watermark', require('./routes/watermark'));
-app.use('/api/page-numbers', require('./routes/pageNumbers'));
+app.use('/api/merge', optionalAuth, require('./routes/merge'));
+app.use('/api/split', optionalAuth, require('./routes/split'));
+app.use('/api/compress', optionalAuth, require('./routes/compress'));
+app.use('/api/pdf-to-word', optionalAuth, require('./routes/pdfToWord'));
+app.use('/api/word-to-pdf', optionalAuth, require('./routes/wordToPdf'));
+app.use('/api/jpg-to-pdf', optionalAuth, require('./routes/jpgToPdf'));
+app.use('/api/pdf-to-jpg', optionalAuth, require('./routes/pdfToJpg'));
+app.use('/api/rotate', optionalAuth, require('./routes/rotate'));
+app.use('/api/watermark', optionalAuth, require('./routes/watermark'));
+app.use('/api/page-numbers', optionalAuth, require('./routes/pageNumbers'));
+app.use('/api/ocr', optionalAuth, require('./routes/ocr'));
+app.use('/api/flatten', optionalAuth, require('./routes/flatten'));
+app.use('/api/sign', optionalAuth, require('./routes/sign'));
+
+app.use('/api/auth', require('./routes/auth'));
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -76,10 +85,15 @@ app.use(errorHandler);
 
 // =============================================================================
 // Start Server & Cleanup Job
-// =============================================================================
-app.listen(PORT, () => {
-  logger.info(`PDF Tools API server running on port ${PORT}`);
-  console.log(`\n🚀 PDF Tools API server running at http://localhost:${PORT}\n`);
+// =============================================================================// Start Server
+sequelize.sync({ alter: true }).then(() => {
+  logger.info('SQLite Database Synced');
+  app.listen(PORT, () => {
+    logger.info(`PDF Tools API server running on port ${PORT}`);
+    console.log(`🚀 PDF Tools API server running at http://localhost:${PORT}`);
+  });
+}).catch(err => {
+  logger.error(`Database sync failed: ${err.message}`);
 });
 
 // Start temp file cleanup cron

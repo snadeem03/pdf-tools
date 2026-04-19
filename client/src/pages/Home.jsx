@@ -11,6 +11,9 @@ const tools = [
   { title: 'Rotate PDF', description: 'Rotate pages to any orientation', icon: '🔄', path: '/rotate' },
   { title: 'Watermark', description: 'Add custom text watermark to pages', icon: '💧', path: '/watermark' },
   { title: 'Page Numbers', description: 'Add page numbers to your PDF', icon: '🔢', path: '/page-numbers' },
+  { title: 'OCR to Text', description: 'Extract text from scanned PDFs & images', icon: '👁️', path: '/ocr' },
+  { title: 'Flatten PDF', description: 'Make form fields read-only and flat', icon: '🔨', path: '/flatten' },
+  { title: 'Sign PDF', description: 'e-Sign your document with an image', icon: '✍️', path: '/sign' },
 ];
 
 export default function Home() {

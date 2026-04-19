@@ -9,11 +9,13 @@
   },
   "dependencies": {
     "archiver": "^6.0.1",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "docx": "^8.5.0",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "express-rate-limit": "^7.4.0",
+    "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.8.0",
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
@@ -21,7 +23,10 @@
     "pdf-lib": "^1.17.1",
     "pdf-merger-js": "^5.1.2",
     "pdf-parse": "^1.1.1",
+    "sequelize": "^6.37.8",
     "sharp": "^0.33.4",
+    "sqlite3": "^6.0.1",
+    "tesseract.js": "^7.0.0",
     "winston": "^3.14.2"
   }
 }
