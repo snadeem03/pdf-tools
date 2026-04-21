@@ -7,6 +7,7 @@ const { uploadDir } = require('../utils/upload');
 exports.signPdf = async (req, res, next) => {
   const pdfFile = req.files['pdf'] ? req.files['pdf'][0] : null;
   const signatureFile = req.files['signature'] ? req.files['signature'][0] : null;
+  const { pageIndex, x, y } = req.body;
 
   if (!pdfFile || !signatureFile) {
     return res.status(400).json({ success: false, error: 'Please upload both a PDF and a Signature image' });
@@ -28,16 +29,19 @@ exports.signPdf = async (req, res, next) => {
       signatureImage = await pdfDoc.embedJpg(sigBytes);
     }
 
-    // Default: put signature at bottom right of the first page
     const pages = pdfDoc.getPages();
-    const firstPage = pages[0];
-    const { width, height } = firstPage.getSize();
+    const pIdx = parseInt(pageIndex) || 0;
+    const targetPage = pages[pIdx] || pages[0];
     
-    const sigDims = signatureImage.scale(0.5); // scale down
+    const sigDims = signatureImage.scale(0.3); // Scale it down a bit more by default
 
-    firstPage.drawImage(signatureImage, {
-      x: width - sigDims.width - 50,
-      y: 50, // 50 units from bottom
+    // Use provided x, y or default to bottom-right
+    const posX = x !== undefined ? parseFloat(x) : 50;
+    const posY = y !== undefined ? parseFloat(y) : 50;
+
+    targetPage.drawImage(signatureImage, {
+      x: posX - (sigDims.width / 2), // Center it on the click point
+      y: posY - (sigDims.height / 2),
       width: sigDims.width,
       height: sigDims.height,
     });
@@ -57,3 +61,4 @@ exports.signPdf = async (req, res, next) => {
     next(err);
   }
 };
+
