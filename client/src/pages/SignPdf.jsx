@@ -2,7 +2,7 @@ import { useState } from 'react';
 import ToolLayout from '../components/ToolLayout';
 import FileUpload from '../components/FileUpload';
 import ProcessButton from '../components/ProcessButton';
-import PdfSignViewer from '../components/PdfSignViewer';
+import PdfInteractiveViewer from '../components/PdfInteractiveViewer';
 import api from '../api';
 import toast from 'react-hot-toast';
 
@@ -85,13 +85,14 @@ export default function SignPdf() {
           {pdfFile && (
             <div>
               <h3 className="text-xl font-bold mb-4" style={{ color: 'var(--color-text)' }}>3. Place Signature</h3>
-              <PdfSignViewer 
+              <PdfInteractiveViewer 
                 file={pdfFile} 
-                signature={signatureFile}
+                overlayConfig={{ type: 'image', file: signatureFile }}
                 onPlace={setSignLocation}
               />
             </div>
           )}
+
 
           <ProcessButton
             onClick={handleProcess}
