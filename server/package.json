@@ -29,7 +29,7 @@
     "puppeteer": "^24.41.0",
     "sequelize": "^6.37.8",
     "sharp": "^0.33.4",
-    "sqlite3": "^6.0.1",
+    "sqlite3": "^5.1.7",
     "tesseract.js": "^7.0.0",
     "winston": "^3.14.2"
   }
