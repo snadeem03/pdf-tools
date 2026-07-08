@@ -6,7 +6,7 @@ const logger = require('../utils/logger');
 const { uploadDir } = require('../utils/upload');
 
 /**
- * Convert JPG/PNG images to a single PDF.
+ * Convert JPG/PNG (and other common formats) images to a single PDF.
  */
 exports.jpgToPdf = async (req, res, next) => {
   const files = req.files;
@@ -18,16 +18,21 @@ exports.jpgToPdf = async (req, res, next) => {
     const pdfDoc = await PDFDocument.create();
 
     for (const file of files) {
-      // Read and convert image to ensure compatibility
-      const imageBuffer = await sharp(file.path)
-        .png() // Normalize to PNG for pdf-lib compatibility
-        .toBuffer();
+      const isJpeg = file.mimetype === 'image/jpeg' || file.mimetype === 'image/jpg';
 
-      const metadata = await sharp(file.path).metadata();
+      // JPEGs are embedded directly (no re-encode) to avoid needlessly
+      // bloating photographic images by round-tripping them through
+      // lossless PNG. Everything else is normalized to PNG, since pdf-lib
+      // only supports embedding JPEG or PNG.
+      const pipeline = sharp(file.path);
+      const imageBuffer = isJpeg ? await pipeline.jpeg().toBuffer() : await pipeline.png().toBuffer();
+      const metadata = await sharp(imageBuffer).metadata();
       const imgWidth = metadata.width || 612;
       const imgHeight = metadata.height || 792;
 
-      const pngImage = await pdfDoc.embedPng(imageBuffer);
+      const embeddedImage = isJpeg
+        ? await pdfDoc.embedJpg(imageBuffer)
+        : await pdfDoc.embedPng(imageBuffer);
 
       // Fit image to page while maintaining aspect ratio
       const pageWidth = 612;
@@ -37,7 +42,7 @@ exports.jpgToPdf = async (req, res, next) => {
       const scaledHeight = imgHeight * scale;
 
       const page = pdfDoc.addPage([pageWidth, pageHeight]);
-      page.drawImage(pngImage, {
+      page.drawImage(embeddedImage, {
         x: (pageWidth - scaledWidth) / 2,
         y: (pageHeight - scaledHeight) / 2,
         width: scaledWidth,
@@ -51,7 +56,8 @@ exports.jpgToPdf = async (req, res, next) => {
 
     logger.info(`Converted ${files.length} images to PDF`);
 
-    res.download(outputPath, 'images.pdf', () => {
+    res.download(outputPath, 'images.pdf', (err) => {
+      if (err) logger.error(`jpg-to-pdf download error: ${err.message}`);
       files.forEach((f) => fs.unlink(f.path, () => {}));
       fs.unlink(outputPath, () => {});
     });

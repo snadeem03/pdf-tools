@@ -1,10 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const multer = require('multer');
+const { uploadSign, verifySignFields } = require('../utils/upload');
 const signController = require('../controllers/signController');
 
-const upload = multer({ dest: 'uploads/', limits: { fileSize: 50 * 1024 * 1024 } });
-
-router.post('/', upload.fields([{ name: 'pdf', maxCount: 1 }, { name: 'signature', maxCount: 1 }]), signController.signPdf);
+router.post(
+  '/',
+  uploadSign.fields([{ name: 'pdf', maxCount: 1 }, { name: 'signature', maxCount: 1 }]),
+  verifySignFields,
+  signController.signPdf
+);
 
 module.exports = router;

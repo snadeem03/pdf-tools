@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../config/jwt');
 
 const authMiddleware = (req, res, next) => {
   // Get token from header
@@ -10,7 +11,7 @@ const authMiddleware = (req, res, next) => {
   const token = authHeader.split(' ')[1];
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret_for_local_dev');
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded.user;
     next();
   } catch (err) {

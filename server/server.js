@@ -98,7 +98,12 @@ app.use(errorHandler);
 // =============================================================================
 // Start Server & Cleanup Job
 // =============================================================================// Start Server
-sequelize.sync({ alter: true }).then(() => {
+// `alter: true` auto-mutates the schema to match the models, which is handy in
+// development but risky in production (unreviewed, unversioned schema changes
+// running on every boot). In production we only create tables that don't
+// exist yet; real schema changes should go through an explicit migration.
+const syncOptions = process.env.NODE_ENV === 'production' ? {} : { alter: true };
+sequelize.sync(syncOptions).then(() => {
   logger.info('SQLite Database Synced');
   app.listen(PORT, () => {
     logger.info(`PDFNova API server running on port ${PORT}`);

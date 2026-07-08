@@ -25,6 +25,15 @@ exports.splitPdf = async (req, res, next) => {
     if (mode === 'range' && ranges) {
       // Parse ranges like "1-3,5,7-9" and create a single PDF with those pages
       const pageIndices = parseRanges(ranges, totalPages);
+
+      if (pageIndices.length === 0) {
+        fs.unlink(file.path, () => {});
+        return res.status(400).json({
+          success: false,
+          error: `"${ranges}" did not match any valid page in a ${totalPages}-page document.`,
+        });
+      }
+
       const newPdf = await PDFDocument.create();
       const pages = await newPdf.copyPages(pdfDoc, pageIndices);
       pages.forEach((p) => newPdf.addPage(p));
@@ -33,7 +42,8 @@ exports.splitPdf = async (req, res, next) => {
       const newBytes = await newPdf.save();
       fs.writeFileSync(outputPath, newBytes);
 
-      res.download(outputPath, 'split.pdf', () => {
+      res.download(outputPath, 'split.pdf', (err) => {
+        if (err) logger.error(`Split download error: ${err.message}`);
         fs.unlink(file.path, () => {});
         fs.unlink(outputPath, () => {});
       });
@@ -43,14 +53,32 @@ exports.splitPdf = async (req, res, next) => {
       const output = fs.createWriteStream(zipPath);
       const archive = archiver('zip', { zlib: { level: 9 } });
 
+      // Throwing inside an event-listener callback is NOT caught by the
+      // surrounding try/catch (it's a different stack), so it would crash the
+      // process with an unhandled exception. Respond gracefully instead.
+      let responded = false;
+      const handleArchiveError = (err) => {
+        logger.error(`Archive error during split: ${err.message}`);
+        fs.unlink(file.path, () => {});
+        fs.unlink(zipPath, () => {});
+        if (!responded && !res.headersSent) {
+          responded = true;
+          res.status(500).json({ success: false, error: 'Failed to build the ZIP archive' });
+        }
+      };
+
       output.on('close', () => {
-        res.download(zipPath, 'split-pages.zip', () => {
+        if (responded) return;
+        responded = true;
+        res.download(zipPath, 'split-pages.zip', (err) => {
+          if (err) logger.error(`Split (all) download error: ${err.message}`);
           fs.unlink(file.path, () => {});
           fs.unlink(zipPath, () => {});
         });
       });
 
-      archive.on('error', (err) => { throw err; });
+      output.on('error', handleArchiveError);
+      archive.on('error', handleArchiveError);
       archive.pipe(output);
 
       for (let i = 0; i < totalPages; i++) {
@@ -71,20 +99,25 @@ exports.splitPdf = async (req, res, next) => {
 
 /**
  * Parse range string "1-3,5,7-9" into 0-indexed page indices.
+ * Silently ignores garbage/out-of-bounds input rather than throwing; the
+ * caller is responsible for treating an empty result as a validation error.
  */
 function parseRanges(rangeStr, totalPages) {
   const indices = new Set();
-  const parts = rangeStr.split(',').map((s) => s.trim());
+  const parts = rangeStr.split(',').map((s) => s.trim()).filter(Boolean);
 
   for (const part of parts) {
     if (part.includes('-')) {
-      const [start, end] = part.split('-').map(Number);
+      const [startRaw, endRaw] = part.split('-');
+      const start = Number(startRaw);
+      const end = Number(endRaw);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
       for (let i = start; i <= end && i <= totalPages; i++) {
         if (i >= 1) indices.add(i - 1);
       }
     } else {
       const num = parseInt(part, 10);
-      if (num >= 1 && num <= totalPages) indices.add(num - 1);
+      if (Number.isFinite(num) && num >= 1 && num <= totalPages) indices.add(num - 1);
     }
   }
 
