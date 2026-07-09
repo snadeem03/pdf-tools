@@ -359,119 +359,116 @@ index a83b53b..62f95e5 100644
        fs.unlink(outputPath, () => {});
      });
 diff --git a/server/controllers/pdfToJpgController.js b/server/controllers/pdfToJpgController.js
-index 2e43c3f..8f1e6f9 100644
+index 2e43c3f..4015632 100644
 --- a/server/controllers/pdfToJpgController.js
 +++ b/server/controllers/pdfToJpgController.js
-@@ -6,8 +6,18 @@ const { PDFDocument } = require('pdf-lib');
+@@ -1,13 +1,12 @@
+ const fs = require('fs');
+ const path = require('path');
+-const puppeteer = require('puppeteer');
+ const archiver = require('archiver');
+-const { PDFDocument } = require('pdf-lib');
  const logger = require('../utils/logger');
  const { uploadDir } = require('../utils/upload');
++const { rasterizePdfToJpegs } = require('../utils/pdfRasterizer');
  
-+// Vendored locally (server/vendor/pdfjs, from the pdfjs-dist npm package) so
-+// this feature doesn't depend on cdnjs.cloudflare.com being reachable at
-+// request time. The scripts are injected as inline content into the
-+// Puppeteer page rather than loaded over the network.
-+const PDFJS_LIB_PATH = path.join(__dirname, '..', 'vendor', 'pdfjs', 'pdf.min.js');
-+const PDFJS_WORKER_PATH = path.join(__dirname, '..', 'vendor', 'pdfjs', 'pdf.worker.min.js');
-+
-+const pdfjsLibSource = fs.readFileSync(PDFJS_LIB_PATH, 'utf-8');
-+const pdfjsWorkerSource = fs.readFileSync(PDFJS_WORKER_PATH, 'utf-8');
-+
  /**
 - * Convert PDF to JPG using Puppeteer and PDF.js
-+ * Convert PDF to JPG using Puppeteer and a locally vendored PDF.js.
++ * Convert PDF to JPG (one image per page, delivered as a ZIP).
   */
  exports.pdfToJpg = async (req, res, next) => {
    const file = req.file;
-@@ -28,12 +38,10 @@ exports.pdfToJpg = async (req, res, next) => {
-     // Read the PDF as base64 to inject into the HTML directly
-     const pdfBase64 = pdfBytes.toString('base64');
+@@ -15,113 +14,51 @@ exports.pdfToJpg = async (req, res, next) => {
+     return res.status(400).json({ success: false, error: 'Please upload a PDF file' });
+   }
  
+-  let browser;
+   try {
+     const pdfBytes = fs.readFileSync(file.path);
+-    const pdfDoc = await PDFDocument.load(pdfBytes);
+-    const totalPages = pdfDoc.getPageCount();
++    const pages = await rasterizePdfToJpegs(pdfBytes);
+ 
+     const zipPath = path.join(uploadDir, `pdf-to-jpg-${Date.now()}.zip`);
+     const output = fs.createWriteStream(zipPath);
+     const archive = archiver('zip', { zlib: { level: 9 } });
+ 
+-    // Read the PDF as base64 to inject into the HTML directly
+-    const pdfBase64 = pdfBytes.toString('base64');
+-
 -    // Generate PDF.js HTML renderer
-     const htmlContent = `
-       <!DOCTYPE html>
-       <html>
-       <head>
+-    const htmlContent = `
+-      <!DOCTYPE html>
+-      <html>
+-      <head>
 -        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-         <style>
-           body { margin: 0; padding: 0; background: white; display: flex; justify-content: center; align-items: center; }
-           canvas { display: block; }
-@@ -42,27 +50,25 @@ exports.pdfToJpg = async (req, res, next) => {
-       <body>
-         <canvas id="pdf-canvas"></canvas>
-         <script>
+-        <style>
+-          body { margin: 0; padding: 0; background: white; display: flex; justify-content: center; align-items: center; }
+-          canvas { display: block; }
+-        </style>
+-      </head>
+-      <body>
+-        <canvas id="pdf-canvas"></canvas>
+-        <script>
 -          pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 -          
-           async function renderPage(base64Data, pageNum) {
-             const pdfData = atob(base64Data);
-             const array = new Uint8Array(pdfData.length);
-             for (let i = 0; i < pdfData.length; i++) {
-               array[i] = pdfData.charCodeAt(i);
-             }
+-          async function renderPage(base64Data, pageNum) {
+-            const pdfData = atob(base64Data);
+-            const array = new Uint8Array(pdfData.length);
+-            for (let i = 0; i < pdfData.length; i++) {
+-              array[i] = pdfData.charCodeAt(i);
+-            }
 -            
-+
-             const loadingTask = pdfjsLib.getDocument({data: array});
-             const pdf = await loadingTask.promise;
-             const page = await pdf.getPage(pageNum);
+-            const loadingTask = pdfjsLib.getDocument({data: array});
+-            const pdf = await loadingTask.promise;
+-            const page = await pdf.getPage(pageNum);
 -            
-+
-             const viewport = page.getViewport({ scale: 2.0 }); // 2x scale for better HD resolution
-             const canvas = document.getElementById('pdf-canvas');
-             const context = canvas.getContext('2d');
-             canvas.height = viewport.height;
-             canvas.width = viewport.width;
+-            const viewport = page.getViewport({ scale: 2.0 }); // 2x scale for better HD resolution
+-            const canvas = document.getElementById('pdf-canvas');
+-            const context = canvas.getContext('2d');
+-            canvas.height = viewport.height;
+-            canvas.width = viewport.width;
 -            
-+
-             await page.render({ canvasContext: context, viewport: viewport }).promise;
+-            await page.render({ canvasContext: context, viewport: viewport }).promise;
 -            
-+
-             // Notify Puppeteer that rendering is finished
-             document.body.classList.add('render-complete');
-           }
-@@ -77,39 +83,67 @@ exports.pdfToJpg = async (req, res, next) => {
-     });
- 
-     const page = await browser.newPage();
+-            // Notify Puppeteer that rendering is finished
+-            document.body.classList.add('render-complete');
+-          }
+-        </script>
+-      </body>
+-      </html>
+-    `;
+-
+-    browser = await puppeteer.launch({
+-      headless: 'new',
+-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+-    });
+-
+-    const page = await browser.newPage();
 -    await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
-+    // No network access needed: pdf.js and its worker are injected as inline
-+    // script content read from disk, instead of `<script src="https://...">`.
-+    await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
-+    await page.addScriptTag({ content: pdfjsLibSource });
-+    await page.evaluate((workerSource) => {
-+      const blob = new Blob([workerSource], { type: 'application/javascript' });
-+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
-+    }, pdfjsWorkerSource);
- 
-     for (let i = 1; i <= totalPages; i++) {
-       // Clear flag
-       await page.evaluate(() => document.body.classList.remove('render-complete'));
+-
+-    for (let i = 1; i <= totalPages; i++) {
+-      // Clear flag
+-      await page.evaluate(() => document.body.classList.remove('render-complete'));
 -      
-+
-       // Render page
-       await page.evaluate((b64, pNum) => {
-         window.renderPage(b64, pNum);
-       }, pdfBase64, i);
+-      // Render page
+-      await page.evaluate((b64, pNum) => {
+-        window.renderPage(b64, pNum);
+-      }, pdfBase64, i);
 -      
-+
-       // Wait for rendering
-       await page.waitForFunction('document.body.classList.contains("render-complete")', { timeout: 30000 });
+-      // Wait for rendering
+-      await page.waitForFunction('document.body.classList.contains("render-complete")', { timeout: 30000 });
 -      
-+
-       // Capture the canvas element
-       const canvasElement = await page.$('canvas');
-       const boundingBox = await canvasElement.boundingBox();
+-      // Capture the canvas element
+-      const canvasElement = await page.$('canvas');
+-      const boundingBox = await canvasElement.boundingBox();
 -      
-+      if (!boundingBox) {
-+        throw new Error(`Failed to capture rendered page ${i}: canvas has no bounding box`);
-+      }
-+
-       // Adjust viewport to ensure the whole image is captured
-       await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.ceil(boundingBox.height) });
+-      // Adjust viewport to ensure the whole image is captured
+-      await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.ceil(boundingBox.height) });
 -      
-+
-       const screenshot = await canvasElement.screenshot({ type: 'jpeg', quality: 90 });
-       archive.append(screenshot, { name: `page-${i}.jpg` });
-     }
- 
+-      const screenshot = await canvasElement.screenshot({ type: 'jpeg', quality: 90 });
+-      archive.append(screenshot, { name: `page-${i}.jpg` });
+-    }
 +    // Throwing inside an event-listener callback is NOT caught by the
 +    // surrounding try/catch (different call stack), so it used to crash the
 +    // process with an unhandled exception on any archive/stream error.
@@ -485,7 +482,7 @@ index 2e43c3f..8f1e6f9 100644
 +        res.status(500).json({ success: false, error: 'Failed to build the ZIP archive' });
 +      }
 +    };
-+
+ 
      output.on('close', () => {
 -      res.download(zipPath, 'pdf-images.zip', () => {
 +      if (responded) return;
@@ -502,7 +499,194 @@ index 2e43c3f..8f1e6f9 100644
 +    archive.on('error', handleArchiveError);
      archive.pipe(output);
  
-     logger.info(`Converted ${totalPages} PDF pages to JPG using Puppeteer`);
+-    logger.info(`Converted ${totalPages} PDF pages to JPG using Puppeteer`);
+-    await archive.finalize();
++    pages.forEach((p, idx) => {
++      archive.append(p.buffer, { name: `page-${idx + 1}.jpg` });
++    });
+ 
++    logger.info(`Converted ${pages.length} PDF pages to JPG`);
++    await archive.finalize();
+   } catch (err) {
+     fs.unlink(file.path, () => {});
+     logger.error('Puppeteer Rasterize Error: ' + err.message);
+     next(err);
+-  } finally {
+-    if (browser) {
+-      await browser.close();
+-    }
+   }
+ };
+diff --git a/server/controllers/pdfToWordController.js b/server/controllers/pdfToWordController.js
+index bd317c3..a121630 100644
+--- a/server/controllers/pdfToWordController.js
++++ b/server/controllers/pdfToWordController.js
+@@ -1,13 +1,101 @@
+ const fs = require('fs');
+ const path = require('path');
+ const pdfParse = require('pdf-parse');
+-const { Document, Packer, Paragraph, TextRun } = require('docx');
++const { Document, Packer, Paragraph, TextRun, ImageRun, PageBreak } = require('docx');
++const { imageSize } = require('image-size');
+ const logger = require('../utils/logger');
+ const { uploadDir } = require('../utils/upload');
++const { rasterizePdfToJpegs } = require('../utils/pdfRasterizer');
++
++// If the extracted text averages out to less than this many characters per
++// page, we treat the PDF as having "no meaningful text" (e.g. a design PDF
++// made entirely of graphics, or a scanned/photographed document) and fall
++// back to embedding rendered page images instead of producing an empty doc.
++const MIN_CHARS_PER_PAGE = 15;
++
++// A4-ish content width in pixels at 96 DPI, matching the ~1in margins docx
++// gives by default on an A4/Letter page. Used to scale embedded page images
++// down so they fit on the page instead of overflowing it.
++const MAX_IMAGE_WIDTH_PX = 600;
++
++/**
++ * Build a text-based DOCX from extracted PDF text.
++ */
++function buildTextDocument(text) {
++  const paragraphs = text
++    .split('\n')
++    .filter((line) => line.trim().length > 0)
++    .map(
++      (line) =>
++        new Paragraph({
++          children: [
++            new TextRun({
++              text: line,
++              size: 24, // 12pt
++              font: 'Calibri',
++            }),
++          ],
++          spacing: { after: 120 },
++        })
++    );
++
++  return new Document({
++    sections: [{ properties: {}, children: paragraphs }],
++  });
++}
++
++/**
++ * Build an image-based DOCX by embedding one rendered page image per page.
++ * Used when a PDF has no meaningful extractable text (design/graphics-only
++ * PDFs, scanned documents, etc.) so the user still gets a usable file
++ * instead of a blank one.
++ */
++async function buildImageDocument(pdfBytes) {
++  const pages = await rasterizePdfToJpegs(pdfBytes);
++
++  const children = [
++    new Paragraph({
++      children: [
++        new TextRun({
++          text:
++            'This PDF is graphic/scanned content with no selectable text, so each page below ' +
++            'is embedded as an image rather than editable text.',
++          italics: true,
++          size: 20,
++          color: '666666',
++        }),
++      ],
++      spacing: { after: 240 },
++    }),
++  ];
++
++  pages.forEach((p, idx) => {
++    const { width: naturalWidth, height: naturalHeight } = imageSize(p.buffer);
++    const scale = Math.min(1, MAX_IMAGE_WIDTH_PX / naturalWidth);
++    const width = Math.round(naturalWidth * scale);
++    const height = Math.round(naturalHeight * scale);
++
++    children.push(
++      new Paragraph({
++        children: [
++          new ImageRun({ data: p.buffer, transformation: { width, height }, type: 'jpg' }),
++        ],
++        spacing: { after: 240 },
++      })
++    );
++
++    if (idx < pages.length - 1) {
++      children.push(new Paragraph({ children: [new PageBreak()] }));
++    }
++  });
++
++  return new Document({ sections: [{ properties: {}, children }] });
++}
+ 
+ /**
+  * Convert PDF to Word (DOCX).
+- * Extracts text from PDF and creates a DOCX document.
++ * Extracts text where available; falls back to embedding page images for
++ * PDFs made of graphics/scans with no meaningful extractable text.
+  */
+ exports.pdfToWord = async (req, res, next) => {
+   const file = req.file;
+@@ -19,40 +107,34 @@ exports.pdfToWord = async (req, res, next) => {
+     const pdfBuffer = fs.readFileSync(file.path);
+     const pdfData = await pdfParse(pdfBuffer);
+ 
+-    // Split text into paragraphs
+-    const paragraphs = pdfData.text
+-      .split('\n')
+-      .filter((line) => line.trim().length > 0)
+-      .map(
+-        (line) =>
+-          new Paragraph({
+-            children: [
+-              new TextRun({
+-                text: line,
+-                size: 24, // 12pt
+-                font: 'Calibri',
+-              }),
+-            ],
+-            spacing: { after: 120 },
+-          })
+-      );
++    const trimmedText = pdfData.text.trim();
++    const avgCharsPerPage = pdfData.numpages > 0 ? trimmedText.length / pdfData.numpages : trimmedText.length;
++    const hasMeaningfulText = avgCharsPerPage >= MIN_CHARS_PER_PAGE;
+ 
+-    const doc = new Document({
+-      sections: [
+-        {
+-          properties: {},
+-          children: paragraphs,
+-        },
+-      ],
+-    });
++    let doc;
++    let mode;
++    if (hasMeaningfulText) {
++      doc = buildTextDocument(pdfData.text);
++      mode = 'text';
++    } else {
++      logger.info(
++        `PDF has little/no extractable text (${trimmedText.length} chars over ${pdfData.numpages} pages); ` +
++        'falling back to image-based conversion'
++      );
++      doc = await buildImageDocument(pdfBuffer);
++      mode = 'image';
++    }
+ 
+     const buffer = await Packer.toBuffer(doc);
+     const outputPath = path.join(uploadDir, `converted-${Date.now()}.docx`);
+     fs.writeFileSync(outputPath, buffer);
+ 
+-    logger.info(`Converted PDF to DOCX: ${pdfData.numpages} pages, ${pdfData.text.length} chars`);
++    logger.info(`Converted PDF to DOCX via ${mode} mode: ${pdfData.numpages} pages, ${trimmedText.length} chars`);
++
++    res.setHeader('X-Conversion-Method', mode);
+ 
+-    res.download(outputPath, 'converted.docx', () => {
++    res.download(outputPath, 'converted.docx', (err) => {
++      if (err) logger.error(`PDF-to-Word download error: ${err.message}`);
+       fs.unlink(file.path, () => {});
+       fs.unlink(outputPath, () => {});
+     });
 diff --git a/server/controllers/removeWatermarkController.js b/server/controllers/removeWatermarkController.js
 index 617efd3..7e00c9d 100644
 --- a/server/controllers/removeWatermarkController.js
@@ -965,6 +1149,18 @@ index 222345f..97ebf29 100644
      next(err);
    }
  };
+diff --git a/server/package.json b/server/package.json
+index 24ad597..56a027c 100644
+--- a/server/package.json
++++ b/server/package.json
+@@ -18,6 +18,7 @@
+     "dotenv": "^16.4.5",
+     "express": "^4.21.0",
+     "express-rate-limit": "^7.4.0",
++    "image-size": "^2.0.2",
+     "jsonwebtoken": "^9.0.3",
+     "mammoth": "^1.8.0",
+     "morgan": "^1.10.0",
 diff --git a/server/routes/auth.js b/server/routes/auth.js
 index 5849ef7..2a3021e 100644
 --- a/server/routes/auth.js
@@ -1280,6 +1476,126 @@ index debc589..0a2d4b5 100644
        req.user = decoded.user;
      } catch (err) {
        // Ignored for optional auth
+diff --git a/server/utils/pdfRasterizer.js b/server/utils/pdfRasterizer.js
+new file mode 100644
+index 0000000..1451bb6
+--- /dev/null
++++ b/server/utils/pdfRasterizer.js
+@@ -0,0 +1,114 @@
++const fs = require('fs');
++const path = require('path');
++const puppeteer = require('puppeteer');
++
++// Vendored locally (server/vendor/pdfjs, from the pdfjs-dist npm package) so
++// this doesn't depend on cdnjs.cloudflare.com being reachable at request
++// time. The scripts are injected as inline content into the Puppeteer page
++// rather than loaded over the network.
++const PDFJS_LIB_PATH = path.join(__dirname, '..', 'vendor', 'pdfjs', 'pdf.min.js');
++const PDFJS_WORKER_PATH = path.join(__dirname, '..', 'vendor', 'pdfjs', 'pdf.worker.min.js');
++
++const pdfjsLibSource = fs.readFileSync(PDFJS_LIB_PATH, 'utf-8');
++const pdfjsWorkerSource = fs.readFileSync(PDFJS_WORKER_PATH, 'utf-8');
++
++const RENDER_HTML = `
++<!DOCTYPE html>
++<html>
++<head>
++  <style>
++    body { margin: 0; padding: 0; background: white; display: flex; justify-content: center; align-items: center; }
++    canvas { display: block; }
++  </style>
++</head>
++<body>
++  <canvas id="pdf-canvas"></canvas>
++  <script>
++    async function renderPage(base64Data, pageNum, scale) {
++      const pdfData = atob(base64Data);
++      const array = new Uint8Array(pdfData.length);
++      for (let i = 0; i < pdfData.length; i++) {
++        array[i] = pdfData.charCodeAt(i);
++      }
++
++      const loadingTask = pdfjsLib.getDocument({data: array});
++      const pdf = await loadingTask.promise;
++      const page = await pdf.getPage(pageNum);
++
++      const viewport = page.getViewport({ scale });
++      const canvas = document.getElementById('pdf-canvas');
++      const context = canvas.getContext('2d');
++      canvas.height = viewport.height;
++      canvas.width = viewport.width;
++
++      await page.render({ canvasContext: context, viewport: viewport }).promise;
++
++      document.body.classList.add('render-complete');
++    }
++  </script>
++</body>
++</html>
++`;
++
++/**
++ * Rasterize every page of a PDF into JPEG buffers using a headless browser
++ * and a locally vendored PDF.js (no external network dependency).
++ *
++ * @param {Buffer} pdfBytes
++ * @param {{ scale?: number, quality?: number }} [options]
++ * @returns {Promise<{ buffer: Buffer, width: number, height: number }[]>}
++ */
++async function rasterizePdfToJpegs(pdfBytes, options = {}) {
++  const { scale = 2.0, quality = 90 } = options;
++  const { PDFDocument } = require('pdf-lib');
++
++  const pdfDoc = await PDFDocument.load(pdfBytes);
++  const totalPages = pdfDoc.getPageCount();
++  const pdfBase64 = pdfBytes.toString('base64');
++
++  let browser;
++  const pages = [];
++  try {
++    browser = await puppeteer.launch({
++      headless: 'new',
++      args: ['--no-sandbox', '--disable-setuid-sandbox'],
++    });
++
++    const page = await browser.newPage();
++    await page.setContent(RENDER_HTML, { waitUntil: 'domcontentloaded' });
++    await page.addScriptTag({ content: pdfjsLibSource });
++    await page.evaluate((workerSource) => {
++      const blob = new Blob([workerSource], { type: 'application/javascript' });
++      window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
++    }, pdfjsWorkerSource);
++
++    for (let i = 1; i <= totalPages; i++) {
++      await page.evaluate(() => document.body.classList.remove('render-complete'));
++      await page.evaluate(
++        (b64, pNum, s) => window.renderPage(b64, pNum, s),
++        pdfBase64,
++        i,
++        scale
++      );
++      await page.waitForFunction('document.body.classList.contains("render-complete")', { timeout: 30000 });
++
++      const canvasElement = await page.$('canvas');
++      const boundingBox = await canvasElement.boundingBox();
++      if (!boundingBox) {
++        throw new Error(`Failed to capture rendered page ${i}: canvas has no bounding box`);
++      }
++
++      await page.setViewport({ width: Math.ceil(boundingBox.width), height: Math.ceil(boundingBox.height) });
++      const buffer = await canvasElement.screenshot({ type: 'jpeg', quality });
++      pages.push({ buffer, width: Math.ceil(boundingBox.width), height: Math.ceil(boundingBox.height) });
++    }
++  } finally {
++    if (browser) {
++      await browser.close();
++    }
++  }
++
++  return pages;
++}
++
++module.exports = { rasterizePdfToJpegs };
 diff --git a/server/utils/responseHandler.js b/server/utils/responseHandler.js
 index 334bd35..ba60021 100644
 --- a/server/utils/responseHandler.js
