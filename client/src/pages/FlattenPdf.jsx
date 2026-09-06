@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import ToolLayout from '../components/ToolLayout';
 import FileUpload from '../components/FileUpload';
 import ProcessButton from '../components/ProcessButton';
-import api from '../api';
+import { processFiles } from '../api';
 import toast from 'react-hot-toast';
 
 export default function FlattenPdf() {
@@ -28,22 +28,16 @@ export default function FlattenPdf() {
     formData.append('file', file);
 
     try {
-      const res = await api.post('/flatten', formData, {
-        responseType: 'blob',
-        onUploadProgress: (ev) => {
-          const p = Math.round((ev.loaded * 100) / ev.total);
-          setProgress(Math.max(10, p));
-        },
-      });
+      const { blob } = await processFiles('/flatten', formData, setProgress);
 
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const url = window.URL.createObjectURL(blob);
       if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
       downloadUrlRef.current = url;
       setDownloadUrl(url);
       setDownloadName(`flattened-${file.name}`);
       toast.success('PDF flattened successfully!');
     } catch (err) {
-      toast.error('Failed to flatten PDF');
+      toast.error(err.message || 'Failed to flatten PDF');
       console.error(err);
     } finally {
       setProcessing(false);

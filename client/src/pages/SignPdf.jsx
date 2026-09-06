@@ -3,7 +3,7 @@ import ToolLayout from '../components/ToolLayout';
 import FileUpload from '../components/FileUpload';
 import ProcessButton from '../components/ProcessButton';
 import PdfInteractiveViewer from '../components/PdfInteractiveViewer';
-import api from '../api';
+import { processFiles } from '../api';
 import toast from 'react-hot-toast';
 
 export default function SignPdf() {
@@ -38,22 +38,16 @@ export default function SignPdf() {
     formData.append('y', signLocation.y);
 
     try {
-      const res = await api.post('/sign', formData, {
-        responseType: 'blob',
-        onUploadProgress: (ev) => {
-          const p = Math.round((ev.loaded * 100) / ev.total);
-          setProgress(Math.max(10, p));
-        },
-      });
+      const { blob } = await processFiles('/sign', formData, setProgress);
 
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const url = window.URL.createObjectURL(blob);
       if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
       downloadUrlRef.current = url;
       setDownloadUrl(url);
       setDownloadName(`signed-${pdfFile.name}`);
       toast.success('PDF signed successfully!');
     } catch (err) {
-      toast.error('Failed to sign PDF');
+      toast.error(err.message || 'Failed to sign PDF');
       console.error(err);
     } finally {
       setProcessing(false);

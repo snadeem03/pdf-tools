@@ -1,7 +1,9 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api'
+  baseURL: import.meta.env.VITE_API_URL
+    ? `${import.meta.env.VITE_API_URL}/api`
+    : '/api'
 });
 
 /**
@@ -29,6 +31,36 @@ export async function processFiles(endpoint, formData, onProgress) {
       }
     },
   });
+
+  // If the server returned an error status, the blob is likely an HTML/JSON
+  // error page — not the expected PDF. Parse it and throw so callers get a
+  // meaningful error instead of a corrupted download.
+  const contentType = response.headers['content-type'] || '';
+  if (response.status < 200 || response.status >= 300) {
+    const text = await response.data.text();
+    let message = `Request failed (${response.status})`;
+    try {
+      const json = JSON.parse(text);
+      message = json.error || json.message || message;
+    } catch {
+      message = text.slice(0, 200) || message;
+    }
+    throw new Error(message);
+  }
+
+  // Even with a 2xx status, a JSON Content-Type means the backend sent an
+  // error object (e.g. 200 with { success: false, error: "..." }).
+  if (contentType.includes('application/json')) {
+    const text = await response.data.text();
+    try {
+      const json = JSON.parse(text);
+      if (json.success === false || json.error) {
+        throw new Error(json.error || 'An error occurred');
+      }
+    } catch (parseErr) {
+      if (parseErr.message && parseErr.message !== 'An error occurred') throw parseErr;
+    }
+  }
 
   // Get filename from Content-Disposition header
   const contentDisposition = response.headers['content-disposition'];

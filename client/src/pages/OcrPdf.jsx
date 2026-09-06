@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import ToolLayout from '../components/ToolLayout';
 import FileUpload from '../components/FileUpload';
 import ProcessButton from '../components/ProcessButton';
-import api from '../api';
+import { processFiles } from '../api';
 import toast from 'react-hot-toast';
 
 export default function OcrPdf() {
@@ -28,22 +28,16 @@ export default function OcrPdf() {
     formData.append('file', file);
 
     try {
-      const res = await api.post('/ocr', formData, {
-        responseType: 'blob',
-        onUploadProgress: (ev) => {
-          const p = Math.round((ev.loaded * 100) / ev.total);
-          setProgress(Math.max(10, p));
-        },
-      });
+      const { blob } = await processFiles('/ocr', formData, setProgress);
 
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const url = window.URL.createObjectURL(blob);
       if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
       downloadUrlRef.current = url;
       setDownloadUrl(url);
       setDownloadName(`ocr-${file.name.replace(/\.[^/.]+$/, "")}.txt`);
       toast.success('Text extracted successfully!');
     } catch (err) {
-      toast.error('Failed to extract text');
+      toast.error(err.message || 'Failed to extract text');
       console.error(err);
     } finally {
       setProcessing(false);

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import ToolLayout from '../components/ToolLayout';
 import FileUpload from '../components/FileUpload';
 import ProcessButton from '../components/ProcessButton';
-import api from '../api';
+import { processFiles } from '../api';
 import toast from 'react-hot-toast';
 
 export default function RemoveWatermarkPdf() {
@@ -39,22 +39,16 @@ export default function RemoveWatermarkPdf() {
     formData.append('marginRight', marginRight);
 
     try {
-      const res = await api.post('/remove-watermark', formData, {
-        responseType: 'blob',
-        onUploadProgress: (ev) => {
-          const p = Math.round((ev.loaded * 100) / ev.total);
-          setProgress(Math.max(10, p));
-        },
-      });
+      const { blob } = await processFiles('/remove-watermark', formData, setProgress);
 
-      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const url = window.URL.createObjectURL(blob);
       if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
       downloadUrlRef.current = url;
       setDownloadUrl(url);
       setDownloadName(`cleansed-${file.name}`);
       toast.success('Watermark successfully removed!');
     } catch (err) {
-      toast.error('Failed to process PDF');
+      toast.error(err.message || 'Failed to process PDF');
       console.error(err);
     } finally {
       setProcessing(false);
