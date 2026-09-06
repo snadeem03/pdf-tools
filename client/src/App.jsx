@@ -1,9 +1,10 @@
-import { useState, useEffect, createContext } from 'react';
+import { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import { AuthProvider } from './AuthContext';
+import { ThemeContext } from './ThemeContext';
 import Home from './pages/Home';
 import MergePdf from './pages/MergePdf';
 import SplitPdf from './pages/SplitPdf';
@@ -21,16 +22,12 @@ import FlattenPdf from './pages/FlattenPdf';
 import SignPdf from './pages/SignPdf';
 import RemoveWatermarkPdf from './pages/RemoveWatermarkPdf';
 
-export const ThemeContext = createContext();
-
 export default function App() {
-  const [darkMode, setDarkMode] = useState(false);
-
-  useEffect(() => {
+  const [darkMode, setDarkMode] = useState(() => {
     const isDark = localStorage.getItem('darkMode') === 'true';
-    setDarkMode(isDark);
     if (isDark) document.documentElement.classList.add('dark');
-  }, []);
+    return isDark;
+  });
 
   const toggleDarkMode = () => {
     setDarkMode(!darkMode);

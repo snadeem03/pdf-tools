@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ToolLayout from '../components/ToolLayout';
 import FileUpload from '../components/FileUpload';
 import ProcessButton from '../components/ProcessButton';
@@ -17,6 +17,13 @@ export default function RemoveWatermarkPdf() {
   const [marginBottom, setMarginBottom] = useState(50);
   const [marginLeft, setMarginLeft] = useState(0);
   const [marginRight, setMarginRight] = useState(0);
+  const downloadUrlRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
+    };
+  }, []);
 
   const handleProcess = async () => {
     if (!file) return;
@@ -41,6 +48,8 @@ export default function RemoveWatermarkPdf() {
       });
 
       const url = window.URL.createObjectURL(new Blob([res.data]));
+      if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
+      downloadUrlRef.current = url;
       setDownloadUrl(url);
       setDownloadName(`cleansed-${file.name}`);
       toast.success('Watermark successfully removed!');
@@ -61,7 +70,7 @@ export default function RemoveWatermarkPdf() {
     >
       {!downloadUrl ? (
         <div className="flex flex-col gap-8">
-          <FileUpload onUpload={(files) => setFile(files[0])} multiple={false} />
+          <FileUpload accept=".pdf" onUpload={(files) => setFile(files[0])} multiple={false} />
 
           <div className="glass-card p-6 flex flex-col gap-6 animate-fade-in-up">
             <div>

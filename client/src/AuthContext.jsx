@@ -1,27 +1,13 @@
-import { createContext, useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from './api';
-
-export const AuthContext = createContext();
+import { AuthContext } from './contexts/AuthContext';
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('token') || null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      localStorage.setItem('token', token);
-      fetchUser();
-    } else {
-      delete api.defaults.headers.common['Authorization'];
-      localStorage.removeItem('token');
-      setUser(null);
-      setLoading(false);
-    }
-  }, [token]);
-
-  const fetchUser = async () => {
+  const fetchUser = useCallback(async () => {
     try {
       const res = await api.get('/auth/me');
       setUser(res.data);
@@ -31,7 +17,20 @@ export function AuthProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (token) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      localStorage.setItem('token', token);
+      fetchUser(); // eslint-disable-line react-hooks/set-state-in-effect -- fetchUser is async; setState happens in its async callback, not synchronously
+    } else {
+      delete api.defaults.headers.common['Authorization'];
+      localStorage.removeItem('token');
+      setUser(null);
+      setLoading(false);
+    }
+  }, [token, fetchUser]);
 
   const login = async (email, password) => {
     const res = await api.post('/auth/login', { email, password });

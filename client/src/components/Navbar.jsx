@@ -1,8 +1,8 @@
 import { useContext, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ThemeContext } from '../App';
-import { AuthContext } from '../AuthContext';
+import { ThemeContext } from '../ThemeContext';
+import { AuthContext } from '../contexts/AuthContext';
 import AuthModal from './AuthModal';
 
 export default function Navbar() {

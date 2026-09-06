@@ -1,4 +1,4 @@
-export default function ProcessButton({ onClick, disabled, processing, progress, downloadUrl, downloadName }) {
+export default function ProcessButton({ onClick, disabled, processing, progress, downloadUrl, downloadName, label = 'Apply Changes' }) {
   return (
     <div className="mt-8 transition-all duration-300">
       {!downloadUrl && (
@@ -27,7 +27,7 @@ export default function ProcessButton({ onClick, disabled, processing, progress,
             </span>
           ) : (
             <span className="relative z-10 flex items-center justify-center gap-2 drop-shadow-md">
-              Apply Changes <span className="group-hover:translate-x-1 transition-transform">→</span>
+              {label} <span className="group-hover:translate-x-1 transition-transform">→</span>
             </span>
           )}
           {/* Shine effect over the button */}

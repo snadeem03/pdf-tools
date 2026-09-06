@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ToolLayout from '../components/ToolLayout';
 import FileUpload from '../components/FileUpload';
 import ProcessButton from '../components/ProcessButton';
@@ -14,6 +14,13 @@ export default function SignPdf() {
   const [downloadUrl, setDownloadUrl] = useState(null);
   const [downloadName, setDownloadName] = useState('');
   const [signLocation, setSignLocation] = useState(null);
+  const downloadUrlRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
+    };
+  }, []);
 
   const handleProcess = async () => {
     if (!pdfFile || !signatureFile || !signLocation) {
@@ -40,6 +47,8 @@ export default function SignPdf() {
       });
 
       const url = window.URL.createObjectURL(new Blob([res.data]));
+      if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
+      downloadUrlRef.current = url;
       setDownloadUrl(url);
       setDownloadName(`signed-${pdfFile.name}`);
       toast.success('PDF signed successfully!');
@@ -99,7 +108,7 @@ export default function SignPdf() {
             disabled={!pdfFile || !signatureFile || !signLocation}
             processing={processing}
             progress={progress}
-            text="Sign PDF"
+            label="Sign PDF"
           />
         </div>
       ) : (

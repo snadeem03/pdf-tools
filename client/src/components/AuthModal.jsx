@@ -1,6 +1,6 @@
 import { useState, useContext } from 'react';
 import { createPortal } from 'react-dom';
-import { AuthContext } from '../AuthContext';
+import { AuthContext } from '../contexts/AuthContext';
 
 export default function AuthModal({ isOpen, onClose }) {
   const { login, register } = useContext(AuthContext);

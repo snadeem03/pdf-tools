@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ToolLayout from '../components/ToolLayout';
 import FileUpload from '../components/FileUpload';
 import ProcessButton from '../components/ProcessButton';
@@ -11,6 +11,13 @@ export default function FlattenPdf() {
   const [progress, setProgress] = useState(0);
   const [downloadUrl, setDownloadUrl] = useState(null);
   const [downloadName, setDownloadName] = useState('');
+  const downloadUrlRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
+    };
+  }, []);
 
   const handleProcess = async () => {
     if (!file) return;
@@ -30,6 +37,8 @@ export default function FlattenPdf() {
       });
 
       const url = window.URL.createObjectURL(new Blob([res.data]));
+      if (downloadUrlRef.current) URL.revokeObjectURL(downloadUrlRef.current);
+      downloadUrlRef.current = url;
       setDownloadUrl(url);
       setDownloadName(`flattened-${file.name}`);
       toast.success('PDF flattened successfully!');
@@ -51,6 +60,7 @@ export default function FlattenPdf() {
       {!downloadUrl ? (
         <>
           <FileUpload
+            accept=".pdf"
             onUpload={(files) => setFile(files[0])}
             multiple={false}
           />

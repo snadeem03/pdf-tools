@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 
-export default function ToolCard({ title, description, icon, path, color, delay = 0 }) {
+export default function ToolCard({ title, description, icon, path, delay = 0 }) {
   return (
     <Link
       to={path}

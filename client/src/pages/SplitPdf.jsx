@@ -25,7 +25,7 @@ export default function SplitPdf() {
       formData.append('mode', mode);
       if (mode === 'range') formData.append('ranges', ranges);
 
-      const { blob, filename } = await processFiles('/split', formData, setProgress);
+      const { blob } = await processFiles('/split', formData, setProgress);
       setDownloadUrl(URL.createObjectURL(blob));
       setProgress(100);
       toast.success('PDF split successfully!');

@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 
-// Set worker path
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 export default function PdfInteractiveViewer({ 
@@ -16,43 +15,11 @@ export default function PdfInteractiveViewer({
   const [loading, setLoading] = useState(true);
   const [overlayPos, setOverlayPos] = useState({ x: 0, y: 0 });
   const [showOverlay, setShowOverlay] = useState(false);
-  const [pdfDoc, setPdfDoc] = useState(null);
+  const pdfDocRef = useRef(null);
   const [pageSize, setPageSize] = useState({ width: 0, height: 0 });
   const [overlayUrl, setOverlayUrl] = useState(null);
 
-  useEffect(() => {
-    if (!file) return;
-
-    const loadPdf = async () => {
-      setLoading(true);
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = pdfjs.getDocument({ data: arrayBuffer });
-        const doc = await loadingTask.promise;
-        setPdfDoc(doc);
-        setNumPages(doc.numPages);
-        renderPage(doc, 1);
-      } catch (err) {
-        console.error('Error loading PDF:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadPdf();
-  }, [file]);
-
-  useEffect(() => {
-    if (overlayConfig?.type === 'image' && overlayConfig.file) {
-      const url = URL.createObjectURL(overlayConfig.file);
-      setOverlayUrl(url);
-      return () => URL.revokeObjectURL(url);
-    } else {
-      setOverlayUrl(null);
-    }
-  }, [overlayConfig]);
-
-  const renderPage = async (doc, pageNum) => {
+  const renderPage = useCallback(async (doc, pageNum) => {
     const page = await doc.getPage(pageNum);
     const renderedViewport = page.getViewport({ scale });
     const canvas = canvasRef.current;
@@ -62,23 +29,54 @@ export default function PdfInteractiveViewer({
     canvas.height = renderedViewport.height;
     canvas.width = renderedViewport.width;
     
-    // Store original PDF points
     const [x1, y1, x2, y2] = page.view;
     setPageSize({ width: x2 - x1, height: y2 - y1 });
 
-    const renderContext = {
-      canvasContext: context,
-      viewport: renderedViewport,
-    };
-    await page.render(renderContext).promise;
-  };
+    await page.render({ canvasContext: context, viewport: renderedViewport }).promise;
+  }, [scale]);
 
+  useEffect(() => {
+    if (!file) return;
+
+    let cancelled = false;
+    const loadPdf = async () => {
+      setLoading(true);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const doc = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+        if (cancelled) return;
+        pdfDocRef.current = doc;
+        setNumPages(doc.numPages);
+        setCurrentPage(1);
+        await renderPage(doc, 1);
+      } catch (err) {
+        console.error('Error loading PDF:', err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    loadPdf();
+    return () => { cancelled = true; };
+  }, [file, renderPage]);
+
+  useEffect(() => {
+    if (overlayConfig?.type === 'image' && overlayConfig.file) {
+      const url = URL.createObjectURL(overlayConfig.file);
+      setOverlayUrl(url); // eslint-disable-line react-hooks/set-state-in-effect
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setOverlayUrl(null);
+    }
+  }, [overlayConfig]);
 
   const handlePageChange = (delta) => {
+    const doc = pdfDocRef.current;
+    if (!doc) return;
     const newPage = Math.min(Math.max(1, currentPage + delta), numPages);
     if (newPage !== currentPage) {
       setCurrentPage(newPage);
-      renderPage(pdfDoc, newPage);
+      renderPage(doc, newPage);
     }
   };
 
@@ -90,9 +88,6 @@ export default function PdfInteractiveViewer({
     setOverlayPos({ x, y });
     setShowOverlay(true);
     
-    // Normalize to PDF points
-    // Since we set the container width to pageSize.width, 
-    // the ratio between CSS pixels and PDF points is 1:1.
     const clickXPoints = x * (pageSize.width / rect.width);
     const clickYPoints = y * (pageSize.height / rect.height);
 
@@ -142,7 +137,6 @@ export default function PdfInteractiveViewer({
           }} 
         />
 
-        
         {showOverlay && (
           <div 
             className="absolute pointer-events-none transition-all duration-200"
@@ -175,12 +169,9 @@ export default function PdfInteractiveViewer({
               >
                 {overlayConfig.text || 'Watermark'}
               </div>
-
             ) : null}
-
           </div>
         )}
-
       </div>
 
       {loading && <div className="text-sm opacity-60 animate-pulse">Loading document...</div>}
