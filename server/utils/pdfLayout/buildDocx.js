@@ -516,23 +516,21 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
         // Determine bold/italic per item based on font metadata and context
         let itemBold, itemItalic;
         if (zone === 'ABSTRACT' || zone === 'INDEX_TERMS') {
-          // In these zones, detect italic label vs body at item level
           const isLabelItem = isLabelItemInZone(item, line, block, zone);
           itemItalic = isLabelItem;
           itemBold = !isLabelItem && (item.fontBold || false);
         } else if (block.isHeading) {
-          // Headings: use font metadata for bold
-          itemBold = item.fontBold || false;
+          itemBold = false;
           itemItalic = item.fontItalic || false;
         } else if (zone === 'TITLE') {
-          // Title: use font metadata
-          itemBold = item.fontBold || false;
+          itemBold = false;
           itemItalic = item.fontItalic || false;
         } else {
-          // Body text: use font metadata selectively
-          // Only apply bold if the font is explicitly bold AND the item is short
-          // (long body text items with bold fonts are likely mis-mapped)
-          itemBold = item.fontBold || false;
+          // Body text: only apply bold if the item text is SHORT
+          // (short bold items are likely emphasis, table headers, etc.)
+          // Long body text items using bold fonts are likely mis-mapped
+          const textLen = (item.str || '').trim().length;
+          itemBold = item.fontBold && textLen < 30;
           itemItalic = item.fontItalic || false;
         }
 
