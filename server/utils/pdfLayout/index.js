@@ -73,6 +73,17 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
   // Stage 5: Classify document zones (after line grouping, on lines)
   classifyZones(processedPages);
 
+  // Stage 6: Re-apply zone-dependent block properties (bold/italic from zone context)
+  for (const page of processedPages) {
+    for (const block of page.blocks || []) {
+      if (block.lines && block.lines.length > 0 && block.lines[0].zone) {
+        block.zone = block.lines[0].zone;
+      }
+      // Update italic based on zone (abstract body text is italic)
+      block.italic = detectBlockItalicFromZone(block);
+    }
+  }
+
   if (debug) {
     // eslint-disable-next-line no-console
     const zoneCounts = {};
@@ -135,6 +146,29 @@ function processPage(page, options = {}) {
     blocks: remaining,
     tables,
   };
+}
+
+/**
+ * Detect italic from zone context (called after classifyZones).
+ */
+function detectBlockItalicFromZone(block) {
+  if (block.italic) return true;
+  if (!block.lines || block.lines.length === 0) return false;
+
+  const text = block.text || '';
+  const zone = block.zone || block.lines[0].zone || 'BODY';
+
+  // Abstract body text is italic (but not the "Abstract—" label)
+  if (zone === 'ABSTRACT') {
+    if (!/^Abstract[—–\-]/i.test(text) && !/^Index Terms[—–\-]/i.test(text)) {
+      return true;
+    }
+  }
+
+  // Subtitle text is italic
+  if (zone === 'SUBTITLE') return true;
+
+  return false;
 }
 
 module.exports = { convertPdfToDocx };
