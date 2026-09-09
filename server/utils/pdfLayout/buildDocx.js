@@ -96,7 +96,6 @@ async function buildDocx(pages, options = {}) {
         const table = buildTable(element, bodySize, typographyContext);
         if (table) {
           children.push(table);
-          children.push(new Paragraph({ spacing: { after: 120 }, children: [] }));
         }
       } else {
         const paragraph = buildParagraph(element, bodySize, typographyContext);
@@ -333,9 +332,8 @@ function buildHeaderFooter(items, pageWidth, typographyContext, type) {
     children: [
       new TextRun({
         text,
-        font: typographyContext?.defaultFont || 'Arial',
+        font: typographyContext?.defaultFont || 'Times New Roman',
         size: 18,
-        color: '888888',
       }),
     ],
     alignment,
@@ -490,17 +488,27 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
         const itemFont = mapFontName(item.fontName, typographyContext);
         const itemSize = fontSizeToHalfPoints(item.fontSize || block.fontSize);
 
-        // Determine bold/italic per item based on font metadata and zone context
+        // Determine bold/italic per item based on font metadata and context
         let itemBold, itemItalic;
         if (zone === 'ABSTRACT' || zone === 'INDEX_TERMS') {
-          // In these zones, detect italic label vs bold body at item level
+          // In these zones, detect italic label vs body at item level
           const isLabelItem = isLabelItemInZone(item, line, block, zone);
           itemItalic = isLabelItem;
-          itemBold = !isLabelItem && (item.fontBold || block.bold || false);
+          itemBold = !isLabelItem && (item.fontBold || false);
+        } else if (block.isHeading) {
+          // Headings: use font metadata for bold
+          itemBold = item.fontBold || false;
+          itemItalic = item.fontItalic || false;
+        } else if (zone === 'TITLE') {
+          // Title: use font metadata
+          itemBold = item.fontBold || false;
+          itemItalic = item.fontItalic || false;
         } else {
-          // Use font metadata first, fall back to block-level detection
-          itemBold = item.fontBold || block.bold || false;
-          itemItalic = item.fontItalic || block.italic || false;
+          // Body text: use font metadata selectively
+          // Only apply bold if the font is explicitly bold AND the item is short
+          // (long body text items with bold fonts are likely mis-mapped)
+          itemBold = item.fontBold || false;
+          itemItalic = item.fontItalic || false;
         }
 
         const itemSuperScript = (item.fontSize || block.fontSize) <= 7.5 && (item.fontSize || block.fontSize) >= 5.0;
@@ -628,7 +636,7 @@ function buildTable(table, bodySize, typographyContext) {
             children: [
               new TextRun({
                 text,
-                font: typographyContext?.defaultFont || 'Arial',
+                font: typographyContext?.defaultFont || 'Times New Roman',
                 size: fontSizeToHalfPoints(cellFontSize),
                 bold: isBold,
                 italics: isItalic,
@@ -656,27 +664,33 @@ function buildTable(table, bodySize, typographyContext) {
 
 /**
  * Compute approximate column widths based on table structure.
+ * Uses column positions to compute proportional widths.
  */
 function computeColumnWidths(table, columns) {
-  const totalWidth = 9000;
-
   if (table.columnPositions && table.columnPositions.length >= 2) {
     const positions = [...table.columnPositions].sort((a, b) => a - b);
-    const widths = [];
-
-    for (let i = 0; i < columns; i++) {
-      if (i === 0) {
-        widths.push(Math.round(((positions[1] || positions[0] + 100) - positions[0]) / 72 * 1440));
-      } else if (i < positions.length) {
-        widths.push(Math.round(((positions[i] - positions[i - 1]) / 72) * 1440));
-      } else {
-        widths.push(Math.round(totalWidth / columns));
+    const totalSpan = positions[positions.length - 1] - positions[0];
+    if (totalSpan > 0) {
+      // Use proportional widths based on column positions
+      const widths = [];
+      for (let i = 0; i < columns; i++) {
+        if (i < positions.length - 1) {
+          const colWidth = Math.round(((positions[i + 1] - positions[i]) / 72) * 1440);
+          widths.push(Math.max(colWidth, 500));
+        } else if (i === positions.length - 1) {
+          // Last column: extend to end of table
+          const lastWidth = Math.round(((positions[i] - positions[i - 1]) / 72) * 1440);
+          widths.push(Math.max(lastWidth, 500));
+        } else {
+          widths.push(Math.round(9000 / columns));
+        }
       }
+      return widths;
     }
-
-    return widths;
   }
 
+  // Fallback: equal widths
+  const totalWidth = 9000;
   const equalWidth = Math.round(totalWidth / columns);
   return Array(columns).fill(equalWidth);
 }

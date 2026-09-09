@@ -28,22 +28,27 @@ function detectTables(blocks, pageWidth) {
 
   for (const header of tableHeaderBlocks) {
     const headerIdx = blocks.indexOf(header);
-    // Find blocks after this header
-    const candidateBlocks = blocks.slice(headerIdx + 1).filter((b) => {
+    // Find blocks after this header, stopping at next section heading or zone change
+    const candidateBlocks = [];
+    for (let i = headerIdx + 1; i < blocks.length; i++) {
+      const b = blocks[i];
       const zone = b.zone || 'BODY';
-      return zone === 'BODY';
-    });
+      if (zone !== 'BODY') break;
+      // Stop at next section heading (Roman numeral pattern)
+      if (b.isHeading && b.headingLevel <= 2) break;
+      candidateBlocks.push(b);
+    }
 
-    if (candidateBlocks.length < 3) continue;
+    if (candidateBlocks.length < 2) continue;
 
     // Find column positions from lines that have items spread horizontally
     const columnPositions = findColumnPositions(candidateBlocks, pageWidth);
     if (columnPositions.length < 2) continue;
 
     // Extract table rows from blocks
-    const tableRows = extractTableRows(candidateBlocks, columnPositions, usedBlockIndices);
+    const tableRows = extractTableRows(candidateBlocks, columnPositions, usedBlockIndices, columnPositions.length);
 
-    if (tableRows.length >= 3) {
+    if (tableRows.length >= 2) {
       allTables.push({
         type: 'table',
         rows: tableRows,
@@ -87,13 +92,14 @@ function findColumnPositions(candidateBlocks, pageWidth) {
 
   const clusters = clusterValues(xPositions, 25);
   // Only keep columns that appear in at least 3 lines
-  return clusters.filter((c) => c.count >= 4).sort((a, b) => a.center - b.center);
+  return clusters.filter((c) => c.count >= 3).sort((a, b) => a.center - b.center);
 }
 
 /**
  * Extract table rows from candidate blocks using column positions.
+ * Builds rows from line items, combining multi-cell lines into a single row.
  */
-function extractTableRows(candidateBlocks, columnPositions, usedBlockIndices) {
+function extractTableRows(candidateBlocks, columnPositions, usedBlockIndices, expectedCols) {
   const rows = [];
 
   for (const block of candidateBlocks) {
@@ -101,7 +107,7 @@ function extractTableRows(candidateBlocks, columnPositions, usedBlockIndices) {
 
     for (const line of block.lines) {
       const items = (line.items || []).filter((it) => it.str && it.str.trim().length > 0);
-      if (items.length < 2) continue;
+      if (items.length < 1) continue;
 
       // Build one row per line
       const row = [];
@@ -110,20 +116,27 @@ function extractTableRows(candidateBlocks, columnPositions, usedBlockIndices) {
         let bestDist = Infinity;
         for (const item of items) {
           const dist = Math.abs(item.x - col.center);
-          if (dist < 30 && dist < bestDist) {
+          if (dist < 40 && dist < bestDist) {
             bestDist = dist;
             bestItem = item;
           }
         }
         row.push(
           bestItem
-            ? { text: bestItem.str.trim(), bold: false, italic: false, fontSize: block.fontSize || 12, alignment: 'left' }
+            ? {
+                text: bestItem.str.trim(),
+                bold: bestItem.fontBold || false,
+                italic: bestItem.fontItalic || false,
+                fontSize: block.fontSize || 12,
+                alignment: 'left',
+              }
             : null
         );
       }
 
       // Only add rows with at least 2 non-empty cells
-      if (row.filter(Boolean).length >= 2) {
+      const nonEmpty = row.filter(Boolean).length;
+      if (nonEmpty >= 2) {
         rows.push(row);
         usedBlockIndices.add(candidateBlocks.indexOf(block));
       }
