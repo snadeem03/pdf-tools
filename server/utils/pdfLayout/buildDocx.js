@@ -188,7 +188,37 @@ async function buildDocx(pages, options = {}) {
           },
           paragraph: {
             spacing: { after: 0, line: 276 },
-            indent: { firstLine: 288 },
+            indent: { firstLine: 288, right: 20 },
+          },
+        },
+        {
+          id: 'Heading1',
+          name: 'heading 1',
+          basedOn: 'Normal',
+          next: 'BodyText',
+          run: {
+            font: 'Times New Roman',
+            size: 24,
+            bold: true,
+          },
+          paragraph: {
+            spacing: { before: 240, after: 0 },
+            indent: { left: 408, hanging: 332 },
+          },
+        },
+        {
+          id: 'Heading2',
+          name: 'heading 2',
+          basedOn: 'Normal',
+          next: 'BodyText',
+          run: {
+            font: 'Times New Roman',
+            size: 22,
+            bold: true,
+          },
+          paragraph: {
+            spacing: { before: 120, after: 0 },
+            indent: { left: 253, hanging: 227 },
           },
         },
       ],
@@ -399,11 +429,9 @@ function buildParagraph(block, bodySize, typographyContext) {
     spacingBefore = 0;
     spacingAfter = 160;
   } else if (isHeading) {
-    // Headings: before based on font size, minimal after
-    spacingBefore = Math.round(halfPoints * 20);
+    spacingBefore = Math.round(halfPoints * 12);
     spacingAfter = 0;
   } else if (isBody) {
-    // Body text: small spacing, line spacing from PDF
     spacingBefore = 0;
     spacingAfter = 0;
     if (block.lineCount > 1) {
@@ -438,29 +466,26 @@ function buildParagraph(block, bodySize, typographyContext) {
       reference: 'pdf-list',
       level: 0,
     };
-    // Override style for list items
     paragraphConfig.style = 'ListParagraph';
   }
 
-  // Indentation: compute from PDF x-position relative to content left margin
-  const pageMargins = detectPageMarginsFromBlock(block);
-  if (block.leftX > pageMargins.left + 15) {
-    const indentTwips = Math.round(((block.leftX - pageMargins.left) / 72) * 1440);
+  // Indentation: compute from PDF x-position
+  const pageWidth = block.pageWidth || 612;
+  const contentLeft = 72; // ~1 inch
+  const contentRight = pageWidth - 72;
+
+  if (block.leftX > contentLeft + 15) {
+    const indentTwips = Math.round(((block.leftX - contentLeft) / 72) * 1440);
     paragraphConfig.indent = paragraphConfig.indent || {};
     paragraphConfig.indent.left = Math.min(indentTwips, convertInchesToTwip(3));
   }
 
-  return new Paragraph(paragraphConfig);
-}
+  // For body text, add first-line indent if not a continuation line
+  if (isBody && block.lineCount > 1 && alignment === 'justified') {
+    // First-line indent is already set via BodyText style
+  }
 
-/**
- * Detect page margins from a block's page context.
- */
-function detectPageMarginsFromBlock(block) {
-  // Use reasonable defaults for academic papers
-  const pageWidth = block.pageWidth || 612;
-  // Standard academic: left ~1 inch (72pt), right ~1 inch (72pt)
-  return { left: 72, right: pageWidth - 72 };
+  return new Paragraph(paragraphConfig);
 }
 
 /**

@@ -328,20 +328,23 @@ function detectBlockAlignment(blockLines, pageMargins) {
 
 /**
  * Detect if a block is likely a heading.
+ * Only detects section/subsection headings, NOT abstract/index terms labels.
  */
 function detectHeadingCandidate(blockLines, fontSize, bodyFontSize) {
-  if (fontSize > bodyFontSize * 1.2) return true;
-
   if (blockLines.length === 1) {
     const text = blockLines[0].text.trim();
+    // Section headings: I. INTRODUCTION, II. RELATED WORK
     if (/^[IVX]+\.\s+[A-Z]/.test(text)) return true;
+    // Subsection headings: A. Fault tolerance mechanisms
     if (/^[A-Z]\.\s+[A-Z]/.test(text)) return true;
-    if (/^\d+\.\s+[A-Z][a-z]/.test(text)) return true;
+    // Numbered subsections: 1.1 User Authentication
     if (/^\d+\.\d+\s+[A-Z]/.test(text)) return true;
+    // Table/Figure captions
     if (/^(TABLE|Figure|Fig\.|Table)\s+\w+/i.test(text)) return true;
-    // Do NOT treat "Abstract" or "Index Terms" as headings - they are
-    // styled as italic text in academic papers, not as heading elements
   }
+
+  // Font size significantly larger than body = heading
+  if (fontSize > bodyFontSize * 1.3 && blockLines.length <= 2) return true;
 
   return false;
 }
@@ -360,6 +363,9 @@ function computeHeadingLevel(fontSize, bodyFontSize, text) {
     if (/^[A-Z]\.\s+[A-Z]/.test(trimmed)) return 2;
     // Numbered subsections: 1.1 User Authentication, 2.3 Results
     if (/^\d+\.\d+\s+[A-Z]/.test(trimmed)) return 3;
+    // "Abstract" and "Index Terms" are subsection-level headings
+    if (/^Abstract/i.test(trimmed)) return 2;
+    if (/^Index Terms/i.test(trimmed)) return 2;
   }
 
   // Font-size-based fallback
