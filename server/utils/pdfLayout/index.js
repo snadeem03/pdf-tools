@@ -158,15 +158,12 @@ function detectBlockItalicFromZone(block) {
   const text = block.text || '';
   const zone = block.zone || block.lines[0].zone || 'BODY';
 
-  // Abstract body text is italic (but not the "Abstract—" label)
+  // Abstract label and Index Terms label are italic
   if (zone === 'ABSTRACT') {
-    if (!/^Abstract[—–\-]/i.test(text) && !/^Index Terms[—–\-]/i.test(text)) {
+    if (/^Abstract[—–\-]/i.test(text) || /^Index Terms[—–\-]/i.test(text)) {
       return true;
     }
   }
-
-  // Subtitle text is italic
-  if (zone === 'SUBTITLE') return true;
 
   return false;
 }

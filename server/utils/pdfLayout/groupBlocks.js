@@ -380,11 +380,9 @@ function detectBlockItalic(blockLines) {
 
   const text = blockLines.map((l) => l.text).join(' ').trim();
 
-  // 2. Abstract and Index Terms content (not the label itself)
-  // These are typically italic in academic papers
+  // 2. Abstract and Index Terms labels (italic in academic papers)
   if (blockLines[0] && blockLines[0].zone === 'ABSTRACT') {
-    // The abstract body text is italic, but not the "Abstract—" label
-    if (!/^Abstract[—–-]/i.test(text) && !/^Index Terms[—–-]/i.test(text)) {
+    if (/^Abstract[—–\-]/i.test(text) || /^Index Terms[—–\-]/i.test(text)) {
       return true;
     }
   }

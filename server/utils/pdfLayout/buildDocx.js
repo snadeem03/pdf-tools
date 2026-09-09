@@ -484,6 +484,7 @@ function buildTable(table, bodySize, typographyContext) {
       const text = cellData ? cellData.text : '';
       const cellFontSize = cellData ? cellData.fontSize : bodySize;
       const isBold = cellData ? cellData.bold : false;
+      const isItalic = cellData ? cellData.italic : false;
 
       const cellWidth = columnWidths[colIdx] || 2000;
 
@@ -506,6 +507,7 @@ function buildTable(table, bodySize, typographyContext) {
                 font: typographyContext?.defaultFont || 'Arial',
                 size: fontSizeToHalfPoints(cellFontSize),
                 bold: isBold,
+                italics: isItalic,
               }),
             ],
             spacing: { before: 40, after: 40 },
