@@ -15,8 +15,8 @@ function detectTables(blocks, pageWidth) {
 
   // Check for explicit table headers
   const tableHeaderBlocks = blocks.filter((b) => {
-    const text = (b.text || '').toUpperCase();
-    return /\bTABLE\s+(I+V?|X+|V*I*|X*[IV]*)\b/.test(text);
+    const text = (b.text || '').trim();
+    return /^TABLE\s+(I+V?|X+|V*I*|X*[IV]*)/i.test(text);
   });
 
   if (tableHeaderBlocks.length === 0) {
