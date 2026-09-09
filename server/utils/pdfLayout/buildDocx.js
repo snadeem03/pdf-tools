@@ -409,6 +409,8 @@ function buildParagraph(block, bodySize, typographyContext) {
  */
 function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
   const runs = [];
+  const bodyFontSize = 10;
+  const bodyHalfPts = fontSizeToHalfPoints(bodyFontSize);
 
   if (block.lines && block.lines.length > 0) {
     const mergedItems = [];
@@ -421,7 +423,8 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
         const itemSize = fontSizeToHalfPoints(item.fontSize || block.fontSize);
         const itemBold = block.bold || false;
         const itemItalic = block.italic || false;
-        const key = `${itemFont}_${itemSize}_${itemBold}_${itemItalic}`;
+        const itemSuperScript = (item.fontSize || block.fontSize) <= 7.5 && (item.fontSize || block.fontSize) >= 5.0;
+        const key = `${itemFont}_${itemSize}_${itemBold}_${itemItalic}_${itemSuperScript}`;
 
         if (mergedItems.length > 0) {
           const last = mergedItems[mergedItems.length - 1];
@@ -431,20 +434,22 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
           }
         }
 
-        mergedItems.push({ key, text: item.str, font: itemFont, size: itemSize, bold: itemBold, italic: itemItalic });
+        mergedItems.push({ key, text: item.str, font: itemFont, size: itemSize, bold: itemBold, italic: itemItalic, superScript: itemSuperScript });
       }
     }
 
     for (const mi of mergedItems) {
-      runs.push(
-        new TextRun({
-          text: mi.text,
-          font: mi.font,
-          size: mi.size,
-          bold: mi.bold,
-          italics: mi.italic,
-        })
-      );
+      const opts = {
+        text: mi.text,
+        font: mi.font,
+        size: mi.size,
+        bold: mi.bold,
+        italics: mi.italic,
+      };
+      if (mi.superScript) {
+        opts.superScript = true;
+      }
+      runs.push(new TextRun(opts));
     }
   }
 
