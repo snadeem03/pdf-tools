@@ -79,7 +79,8 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
       if (block.lines && block.lines.length > 0 && block.lines[0].zone) {
         block.zone = block.lines[0].zone;
       }
-      // Update italic based on zone (abstract body text is italic)
+      // Update bold/italic based on zone
+      block.bold = detectBlockBoldFromZone(block);
       block.italic = detectBlockItalicFromZone(block);
     }
   }
@@ -149,20 +150,48 @@ function processPage(page, options = {}) {
 }
 
 /**
+ * Detect bold from zone context (called after classifyZones).
+ * iLovePDF uses bold for: abstract (including label), index terms (including label),
+ * section headings, table cells.
+ */
+function detectBlockBoldFromZone(block) {
+  if (block.bold) return true;
+  if (!block.lines || block.lines.length === 0) return false;
+
+  const zone = block.zone || block.lines[0].zone || 'BODY';
+
+  // Abstract text is all bold (label + body)
+  if (zone === 'ABSTRACT') {
+    return true;
+  }
+
+  // Index Terms text is all bold (label + body)
+  if (zone === 'INDEX_TERMS') {
+    return true;
+  }
+
+  // Section headings (Roman numerals or A./B. pattern) are bold
+  if (zone === 'BODY' && block.isHeading) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Detect italic from zone context (called after classifyZones).
+ * For ABSTRACT/INDEX_TERMS zones, italic is handled at item level in buildTextRuns,
+ * so we don't set block-level italic here.
  */
 function detectBlockItalicFromZone(block) {
   if (block.italic) return true;
   if (!block.lines || block.lines.length === 0) return false;
 
-  const text = block.text || '';
+  // ABSTRACT/INDEX_TERMS italic is handled at item level in buildTextRuns
+  // (label is italic, body is not)
   const zone = block.zone || block.lines[0].zone || 'BODY';
-
-  // Abstract label and Index Terms label are italic
-  if (zone === 'ABSTRACT') {
-    if (/^Abstract[—–\-]/i.test(text) || /^Index Terms[—–\-]/i.test(text)) {
-      return true;
-    }
+  if (zone === 'ABSTRACT' || zone === 'INDEX_TERMS') {
+    return false;
   }
 
   return false;

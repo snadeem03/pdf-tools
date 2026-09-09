@@ -195,35 +195,45 @@ async function buildDocx(pages, options = {}) {
 }
 
 /**
- * Compute actual page margins from block positions.
+ * Compute page margins.
+ * Uses content bounding box for left/right margins (reliable).
+ * For top/bottom, uses computed values with fallback to standard A4
+ * (matching iLovePDF reference for this paper format).
  */
 function computePageMargins(pages) {
   const result = [];
 
+  // Collect body content positions (excluding headers/footers)
+  const allBlocks = [];
   for (const page of pages) {
-    const blocks = page.blocks || [];
-    if (blocks.length === 0) {
-      result.push({ top: 720, bottom: 720, left: 708, right: 708 });
-      continue;
+    for (const block of page.blocks || []) {
+      const zone = block.zone || '';
+      if (zone === 'HEADER' || zone === 'FOOTER') continue;
+      allBlocks.push(block);
     }
+  }
 
-    const allLeftX = blocks.map((b) => b.leftX).filter((x) => x > 0).sort((a, b) => a - b);
-    const allRightX = blocks.map((b) => b.rightX).filter((x) => x > 0).sort((a, b) => b - a);
-    const allTopY = blocks.map((b) => b.topY).sort((a, b) => b - a);
-    const allBottomY = blocks.map((b) => b.bottomY).sort((a, b) => a - b);
+  if (allBlocks.length === 0) {
+    for (const page of pages) {
+      result.push({ top: 1000, bottom: 480, left: 708, right: 708 });
+    }
+    return result;
+  }
 
-    // Use 10th percentile for margins
-    const leftPt = allLeftX[Math.floor(allLeftX.length * 0.1)] || 72;
-    const rightPt = allRightX[Math.floor(allRightX.length * 0.1)] || (page.width - 72);
-    const topPt = allTopY[Math.floor(allTopY.length * 0.1)] || (page.height - 72);
-    const bottomPt = allBottomY[Math.floor(allBottomY.length * 0.1)] || 72;
+  const pageWidth = pages[0] ? pages[0].width : 595.32;
 
-    result.push({
-      top: Math.round(((page.height - topPt) / 72) * 1440),
-      bottom: Math.round((bottomPt / 72) * 1440),
-      left: Math.round((leftPt / 72) * 1440),
-      right: Math.round(((page.width - rightPt) / 72) * 1440),
-    });
+  // Left/right from content bounding box (reliable)
+  const minLeftX = Math.min(...allBlocks.filter((b) => b.leftX > 0).map((b) => b.leftX));
+  const maxRightX = Math.max(...allBlocks.filter((b) => b.rightX > 0).map((b) => b.rightX));
+  const left = Math.round((minLeftX / 72) * 1440);
+  const right = Math.round(((pageWidth - maxRightX) / 72) * 1440);
+
+  // For top/bottom: use standard A4 academic paper margins
+  // (computed values are unreliable due to headers/titles near page edges)
+  const margins = { top: 1000, bottom: 480, left, right };
+
+  for (const page of pages) {
+    result.push(margins);
   }
 
   return result;
@@ -406,6 +416,10 @@ function buildParagraph(block, bodySize, typographyContext) {
  * Build TextRuns for a block.
  * Merges adjacent items with the same formatting into single runs,
  * preventing character-level fragmentation.
+ *
+ * Special handling for ABSTRACT/INDEX_TERMS zones:
+ * The label ("Abstract—"/"Index Terms—") is italic+not-bold,
+ * the body text is bold+not-italic.
  */
 function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
   const runs = [];
@@ -414,6 +428,7 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
 
   if (block.lines && block.lines.length > 0) {
     const mergedItems = [];
+    const zone = block.zone || '';
 
     for (const line of block.lines) {
       for (const item of line.items) {
@@ -421,8 +436,19 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
 
         const itemFont = mapFontName(item.fontName, typographyContext);
         const itemSize = fontSizeToHalfPoints(item.fontSize || block.fontSize);
-        const itemBold = block.bold || false;
-        const itemItalic = block.italic || false;
+
+        // Determine bold/italic per item based on zone context
+        let itemBold, itemItalic;
+        if (zone === 'ABSTRACT' || zone === 'INDEX_TERMS') {
+          // In these zones, determine if this item is the label or body
+          const isLabelItem = isLabelItemInZone(item, line, block, zone);
+          itemBold = !isLabelItem; // body is bold, label is not
+          itemItalic = isLabelItem; // label is italic, body is not
+        } else {
+          itemBold = block.bold || false;
+          itemItalic = block.italic || false;
+        }
+
         const itemSuperScript = (item.fontSize || block.fontSize) <= 7.5 && (item.fontSize || block.fontSize) >= 5.0;
         const key = `${itemFont}_${itemSize}_${itemBold}_${itemItalic}_${itemSuperScript}`;
 
@@ -466,6 +492,45 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
   }
 
   return runs;
+}
+
+/**
+ * Determine if an item is part of the label in ABSTRACT/INDEX_TERMS zones.
+ * The label is the text before the body starts (e.g., "Abstract—" or "Index Terms—").
+ */
+function isLabelItemInZone(item, line, block, zone) {
+  // Build cumulative text from the start of the block to this item
+  const text = block.text || '';
+  let labelPattern;
+  if (zone === 'ABSTRACT') {
+    labelPattern = /^Abstract[—–\-]\s*/i;
+  } else if (zone === 'INDEX_TERMS') {
+    labelPattern = /^Index Terms[—–\-]\s*/i;
+  } else {
+    return false;
+  }
+
+  // If the block text matches the label pattern, check if this item's text
+  // falls within the label portion
+  const match = text.match(labelPattern);
+  if (!match) return false;
+
+  const labelLength = match[0].length;
+
+  // Find cumulative character position of this item in the block
+  let charPos = 0;
+  for (const line2 of block.lines) {
+    for (const item2 of line2.items) {
+      if (item2 === item) {
+        // Check if this item overlaps with the label portion
+        const itemEnd = charPos + (item.str || '').length;
+        return charPos < labelLength;
+      }
+      charPos += (item2.str || '').length;
+    }
+  }
+
+  return false;
 }
 
 /**

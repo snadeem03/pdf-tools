@@ -141,14 +141,19 @@ function extractDocxStructure(docxPath) {
     result.pageHeight = parseInt(sectPrMatch[2]);
   }
 
-  // Margins from sectPr
-  const marginMatch = docXml.match(/<w:pgMar[^/]+w:top="(\d+)"[^/]+w:right="(\d+)"[^/]+w:bottom="(\d+)"[^/]+w:left="(\d+)"/);
-  if (marginMatch) {
+  // Margins from sectPr (any attribute order)
+  const pgMarMatch = docXml.match(/<w:pgMar[^/]+\/>/);
+  if (pgMarMatch) {
+    const pgMarStr = pgMarMatch[0];
+    const topM = pgMarStr.match(/w:top="(\d+)"/);
+    const rightM = pgMarStr.match(/w:right="(\d+)"/);
+    const bottomM = pgMarStr.match(/w:bottom="(\d+)"/);
+    const leftM = pgMarStr.match(/w:left="(\d+)"/);
     result.margins = {
-      top: parseInt(marginMatch[1]),
-      right: parseInt(marginMatch[2]),
-      bottom: parseInt(marginMatch[3]),
-      left: parseInt(marginMatch[4]),
+      top: topM ? parseInt(topM[1]) : 0,
+      right: rightM ? parseInt(rightM[1]) : 0,
+      bottom: bottomM ? parseInt(bottomM[1]) : 0,
+      left: leftM ? parseInt(leftM[1]) : 0,
     };
   }
 

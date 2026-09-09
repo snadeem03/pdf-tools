@@ -85,9 +85,9 @@ function findColumnPositions(candidateBlocks, pageWidth) {
 
   if (xPositions.length < 6) return [];
 
-  const clusters = clusterValues(xPositions, 18);
+  const clusters = clusterValues(xPositions, 25);
   // Only keep columns that appear in at least 3 lines
-  return clusters.filter((c) => c.count >= 3).sort((a, b) => a.center - b.center);
+  return clusters.filter((c) => c.count >= 4).sort((a, b) => a.center - b.center);
 }
 
 /**

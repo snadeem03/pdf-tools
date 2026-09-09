@@ -98,7 +98,12 @@ function detectParagraphBreak(prevLine, newLine, currentBlock, bodyFontSize) {
   // 2. Page boundary
   if (newLine.pageIndex !== prevLine.pageIndex) return true;
 
-  // 3. Section heading detection
+  // 3. Title lines: merge consecutive centered large-font lines (title may wrap)
+  if (isTitleLikeLine(prevLine, bodyFontSize) && isTitleLikeLine(newLine, bodyFontSize)) {
+    return false;
+  }
+
+  // 4. Section heading detection
   if (isSectionHeading(newLine)) return true;
   if (isSubsectionHeading(newLine)) return true;
 
@@ -185,6 +190,27 @@ function isListItemStart(line) {
   if (/^\d+[.)]\s/.test(text)) return true;
   if (/^[a-z][.)]\s/i.test(text)) return true;
   return false;
+}
+
+/**
+ * Detect if a line is title-like (centered, large font).
+ * Used to merge multi-line titles into a single block.
+ */
+function isTitleLikeLine(line, bodyFontSize) {
+  if (!line) return false;
+  const text = (line.text || '').trim();
+  if (text.length < 5) return false;
+  if (line.fontSize < bodyFontSize * 1.2) return false;
+
+  const centerX = line.x + (line.width || 0) / 2;
+  const pageWidth = line.pageWidth || 612;
+  if (Math.abs(centerX - pageWidth / 2) > pageWidth * 0.15) return false;
+
+  // Exclude header/footer-like patterns
+  const nonTitlePatterns = ['ISSN', 'www.', 'http', 'Volume', 'Issue', '©'];
+  if (nonTitlePatterns.some((p) => text.includes(p))) return false;
+
+  return true;
 }
 
 /**
