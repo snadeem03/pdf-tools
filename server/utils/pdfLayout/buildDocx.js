@@ -10,6 +10,7 @@
  *   - tables (editable, with borders)
  *   - page breaks
  *   - page dimensions and margins
+ *   - headers and footers
  */
 
 const {
@@ -27,6 +28,8 @@ const {
   WidthType,
   ShadingType,
   convertInchesToTwip,
+  Header,
+  Footer,
 } = require('docx');
 
 const { mapFontName, fontSizeToHalfPoints, classifyFontSizes } = require('./analyzeTypography');
@@ -57,9 +60,13 @@ const ALIGN_MAP = {
  */
 async function buildDocx(pages, options = {}) {
   const { typographyContext = {} } = options;
+
   // Classify font sizes across all blocks
   const allBlocks = pages.flatMap((p) => p.blocks || []);
   const { bodySize } = classifyFontSizes(allBlocks);
+
+  // Extract headers and footers from all pages
+  const headerFooter = extractHeaderFooter(pages);
 
   // Compute default margins (approximate from typical PDF margins)
   const defaultMargin = convertInchesToTwip(1);
@@ -71,10 +78,8 @@ async function buildDocx(pages, options = {}) {
     const pageWidth = page.width || 612;
     const pageHeight = page.height || 792;
 
-    // Map PDF points to Word twips (1 pt = 20 twips, but we scale to inches first)
-    // PDF 72 pts = 1 inch
-    const sectionWidth = Math.round((pageWidth / 72) * 1440); // twips
-    const sectionHeight = Math.round((pageHeight / 72) * 1440); // twips
+    const sectionWidth = Math.round((pageWidth / 72) * 1440);
+    const sectionHeight = Math.round((pageHeight / 72) * 1440);
 
     const children = [];
 
@@ -83,10 +88,9 @@ async function buildDocx(pages, options = {}) {
 
     for (const element of elements) {
       if (element.type === 'table') {
-        const table = buildTable(element, bodySize);
+        const table = buildTable(element, bodySize, typographyContext);
         if (table) {
           children.push(table);
-          // Add spacing after table
           children.push(new Paragraph({ spacing: { after: 120 }, children: [] }));
         }
       } else {
@@ -105,7 +109,8 @@ async function buildDocx(pages, options = {}) {
       );
     }
 
-    sections.push({
+    // Build section config with headers/footers
+    const sectionConfig = {
       properties: {
         page: {
           size: {
@@ -121,7 +126,25 @@ async function buildDocx(pages, options = {}) {
         },
       },
       children,
-    });
+    };
+
+    // Add headers and footers for this page
+    const pageHeaders = headerFooter.headers.filter((h) => h.pageIndex === pageIdx);
+    const pageFooters = headerFooter.footers.filter((f) => f.pageIndex === pageIdx);
+
+    if (pageHeaders.length > 0 || pageFooters.length > 0) {
+      const headerContent = buildHeaderFooter(pageHeaders, pageWidth, typographyContext, 'header');
+      const footerContent = buildHeaderFooter(pageFooters, pageWidth, typographyContext, 'footer');
+
+      if (headerContent) {
+        sectionConfig.headers = { default: headerContent };
+      }
+      if (footerContent) {
+        sectionConfig.footers = { default: footerContent };
+      }
+    }
+
+    sections.push(sectionConfig);
   }
 
   // If no sections were created (empty PDF), add a minimal one
@@ -145,6 +168,89 @@ async function buildDocx(pages, options = {}) {
   });
 
   return Packer.toBuffer(doc);
+}
+
+/**
+ * Extract headers and footers from page data.
+ */
+function extractHeaderFooter(pages) {
+  const headers = [];
+  const footers = [];
+
+  for (const page of pages) {
+    const allItems = page.items || [];
+    const pageIdx = page.pageIndex;
+
+    for (const item of allItems) {
+      const zone = item.zone || '';
+
+      // Header items are at the top of the page
+      if (zone === 'HEADER') {
+        headers.push({
+          text: (item.str || '').trim(),
+          y: item.y,
+          pageIndex: pageIdx,
+        });
+      }
+
+      // Footer items are at the bottom of the page
+      if (zone === 'FOOTER') {
+        footers.push({
+          text: (item.str || '').trim(),
+          y: item.y,
+          pageIndex: pageIdx,
+        });
+      }
+    }
+  }
+
+  return { headers, footers };
+}
+
+/**
+ * Build a header or footer.
+ * @param {object[]} items - header/footer items
+ * @param {number} pageWidth - page width in points
+ * @param {object} typographyContext - typography context
+ * @param {string} type - 'header' or 'footer'
+ * @returns {Header|Footer|null}
+ */
+function buildHeaderFooter(items, pageWidth, typographyContext, type) {
+  if (!items || items.length === 0) return null;
+
+  // Sort by Y position
+  items.sort((a, b) => a.y - b.y);
+
+  // Combine text items into a single line
+  const text = items.map((i) => i.text).join(' ');
+
+  if (!text.trim()) return null;
+
+  // Determine alignment based on position
+  const avgX = items.reduce((s, i) => s + (i.x || 0), 0) / items.length;
+  const centerX = pageWidth / 2;
+
+  let alignment = AlignmentType.CENTER;
+  if (avgX < centerX * 0.5) alignment = AlignmentType.LEFT;
+  else if (avgX > centerX * 1.5) alignment = AlignmentType.RIGHT;
+
+  const paragraph = new Paragraph({
+    children: [
+      new TextRun({
+        text,
+        font: typographyContext?.defaultFont || 'Arial',
+        size: 18,
+        color: '888888',
+      }),
+    ],
+    alignment,
+    spacing: { before: 0, after: 0 },
+  });
+
+  if (type === 'footer') {
+    return new Footer({ children: [paragraph] });
+  }
+  return new Header({ children: [paragraph] });
 }
 
 /**
@@ -178,20 +284,14 @@ function buildParagraph(block, bodySize, typographyContext) {
   const isHeading = block.isHeading && block.headingLevel > 0;
   const headingLevel = isHeading ? HEADING_LEVELS[Math.min(block.headingLevel, 4)] : undefined;
 
-  // Font size
   const halfPoints = fontSizeToHalfPoints(block.fontSize);
-
-  // Font name (with typography context for better mapping)
   const fontName = mapFontName(block.fontName, typographyContext);
-
-  // Alignment
   const alignment = ALIGN_MAP[block.alignment] || AlignmentType.LEFT;
 
   // Spacing estimation
   const spacingBefore = isHeading ? Math.round(bodySize * 40) : 0;
   const spacingAfter = isHeading ? Math.round(bodySize * 20) : 120;
 
-  // Build TextRuns for the paragraph
   const runs = buildTextRuns(block, fontName, halfPoints, typographyContext);
 
   const paragraphConfig = {
@@ -200,7 +300,7 @@ function buildParagraph(block, bodySize, typographyContext) {
     spacing: {
       before: spacingBefore,
       after: spacingAfter,
-      line: block.lineCount > 1 ? 276 : undefined, // 1.15 line spacing for multi-line
+      line: block.lineCount > 1 ? 276 : undefined,
     },
   };
 
@@ -209,7 +309,7 @@ function buildParagraph(block, bodySize, typographyContext) {
   }
 
   // Indentation
-  const leftMargin = 72; // ~1 inch in PDF points
+  const leftMargin = 72;
   if (block.leftX > leftMargin + 20) {
     const indentTwips = Math.round(((block.leftX - leftMargin) / 72) * 1440);
     paragraphConfig.indent = { left: Math.min(indentTwips, convertInchesToTwip(3)) };
@@ -220,13 +320,10 @@ function buildParagraph(block, bodySize, typographyContext) {
 
 /**
  * Build TextRuns for a block.
- * Currently creates a single run; could be extended for mixed formatting
- * within a single block (e.g., bold labels + regular values).
  */
 function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
   const runs = [];
 
-  // Check if this block has items with mixed formatting
   if (block.lines && block.lines.length > 0) {
     for (const line of block.lines) {
       for (const item of line.items) {
@@ -246,7 +343,6 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
     }
   }
 
-  // Fallback: single run with block text
   if (runs.length === 0) {
     runs.push(
       new TextRun({
@@ -265,15 +361,13 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
 /**
  * Build a docx Table from a detected table structure.
  */
-function buildTable(table, bodySize) {
+function buildTable(table, bodySize, typographyContext) {
   if (!table || !table.rows || table.rows.length === 0) return null;
 
-  const columns = table.columns || table.rows[0].length;
+  const columns = table.columns || (table.rows[0] ? table.rows[0].length : 0);
   if (columns === 0) return null;
 
-  // Calculate column widths
   const columnWidths = computeColumnWidths(table, columns);
-
   const tableRows = [];
 
   for (let rowIdx = 0; rowIdx < table.rows.length; rowIdx++) {
@@ -284,10 +378,7 @@ function buildTable(table, bodySize) {
       const cellData = row[colIdx];
       const text = cellData ? cellData.text : '';
       const cellFontSize = cellData ? cellData.fontSize : bodySize;
-
-      // Determine if cell should be bold: label cells (first column ending with colon) are bold
-      const isLabel = colIdx === 0 && text.trim().endsWith(':');
-      const isBold = isLabel;
+      const isBold = cellData ? cellData.bold : false;
 
       const cellWidth = columnWidths[colIdx] || 2000;
 
@@ -306,8 +397,8 @@ function buildTable(table, bodySize) {
           new Paragraph({
             children: [
               new TextRun({
-                text: text,
-                font: 'Arial',
+                text,
+                font: typographyContext?.defaultFont || 'Arial',
                 size: fontSizeToHalfPoints(cellFontSize),
                 bold: isBold,
               }),
@@ -336,10 +427,9 @@ function buildTable(table, bodySize) {
  * Compute approximate column widths based on table structure.
  */
 function computeColumnWidths(table, columns) {
-  const totalWidth = 9000; // Approximate usable width in twips
+  const totalWidth = 9000;
 
   if (table.columnPositions && table.columnPositions.length >= 2) {
-    // Use actual column positions
     const positions = [...table.columnPositions].sort((a, b) => a - b);
     const widths = [];
 
@@ -356,7 +446,6 @@ function computeColumnWidths(table, columns) {
     return widths;
   }
 
-  // Fallback: equal widths
   const equalWidth = Math.round(totalWidth / columns);
   return Array(columns).fill(equalWidth);
 }
