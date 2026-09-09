@@ -1,11 +1,8 @@
 /**
  * Table detection from text block geometry.
  *
- * Strategy:
- *   1. Analyze item-level X positions within lines to find column boundaries
- *   2. Look for rows where items are distributed across multiple X positions
- *   3. Find recurring column positions across multiple lines
- *   4. Build a table from the detected grid
+ * Uses explicit table headers ("TABLE I", "TABLE II") as anchors,
+ * then finds table data below them with consistent column alignment.
  *
  * @param {object[]} blocks – output of groupBlocks for a single page
  * @param {number} pageWidth
@@ -16,178 +13,152 @@ function detectTables(blocks, pageWidth) {
     return { tables: [], remaining: blocks || [] };
   }
 
-  // Look at item-level X positions within each block's lines
-  // to detect multi-column structures (key-value pairs, table cells, etc.)
-  const candidateRows = [];
+  // Check for explicit table headers
+  const tableHeaderBlocks = blocks.filter((b) => {
+    const text = (b.text || '').toUpperCase();
+    return /\bTABLE\s+(I+V?|X+|V*I*|X*[IV]*)\b/.test(text);
+  });
 
-  for (const block of blocks) {
-    if (!block.lines) continue;
+  if (tableHeaderBlocks.length === 0) {
+    return { tables: [], remaining: blocks };
+  }
 
-    for (const line of block.lines) {
-      if (!line.items || line.items.length < 2) continue;
+  const allTables = [];
+  const usedBlockIndices = new Set();
 
-      // Filter to meaningful text items (not spaces/empty)
-      const meaningfulItems = line.items.filter((it) => it.str && it.str.trim().length > 0);
-      if (meaningfulItems.length < 2) continue;
+  for (const header of tableHeaderBlocks) {
+    const headerIdx = blocks.indexOf(header);
+    // Find blocks after this header
+    const candidateBlocks = blocks.slice(headerIdx + 1).filter((b) => {
+      const zone = b.zone || 'BODY';
+      return zone === 'BODY';
+    });
 
-      // Check if items span a significant horizontal distance
-      const minX = Math.min(...meaningfulItems.map((it) => it.x));
-      const maxX = Math.max(...meaningfulItems.map((it) => it.x + it.width));
-      const span = maxX - minX;
+    if (candidateBlocks.length < 3) continue;
 
-      // Use a lower threshold: at least 10% of page width or 50 PDF units
-      if (span < Math.max(pageWidth * 0.1, 50)) continue;
+    // Find column positions from lines that have items spread horizontally
+    const columnPositions = findColumnPositions(candidateBlocks, pageWidth);
+    if (columnPositions.length < 2) continue;
 
-      // This line has multiple items spread horizontally – candidate for table row
-      candidateRows.push({
-        items: meaningfulItems,
-        y: line.y,
-        fontSize: line.fontSize,
-        block,
+    // Extract table rows from blocks
+    const tableRows = extractTableRows(candidateBlocks, columnPositions, usedBlockIndices);
+
+    if (tableRows.length >= 3) {
+      allTables.push({
+        type: 'table',
+        rows: tableRows,
+        columns: columnPositions.length,
+        confidence: 0.85,
+        headerText: header.text.substring(0, 60),
       });
     }
   }
 
-  if (candidateRows.length < 2) {
-    return { tables: [], remaining: blocks };
-  }
-
-  // Find column positions by clustering item X positions
-  const allItemXPositions = [];
-  for (const row of candidateRows) {
-    for (const item of row.items) {
-      allItemXPositions.push(item.x);
-    }
-  }
-
-  const columnClusters = clusterValues(allItemXPositions, 25);
-
-  if (columnClusters.length < 2) {
-    return { tables: [], remaining: blocks };
-  }
-
-  // Sort columns by position
-  columnClusters.sort((a, b) => a.center - b.center);
-
-  // Check that column positions are reasonably evenly spaced
-  const colPositions = columnClusters.map((c) => c.center);
-  if (colPositions.length >= 2) {
-    const gaps = [];
-    for (let i = 1; i < colPositions.length; i++) {
-      gaps.push(colPositions[i] - colPositions[i - 1]);
-    }
-    const avgGap = gaps.reduce((s, g) => s + g, 0) / gaps.length;
-    const gapVariance = gaps.reduce((s, g) => s + Math.pow(g - avgGap, 2), 0) / gaps.length;
-    const gapStdDev = Math.sqrt(gapVariance);
-
-    // If gaps are too inconsistent, probably not a real table
-    if (avgGap > 0 && gapStdDev / avgGap > 0.8) {
-      return { tables: [], remaining: blocks };
-    }
-  }
-
-  // Build table rows from candidate rows
-  const tableRows = [];
-  const usedBlockIndices = new Set();
-
-  // Sort candidate rows by Y position (top to bottom in PDF coords = highest Y first)
-  candidateRows.sort((a, b) => b.y - a.y);
-
-  for (const row of candidateRows) {
-    const tableRow = [];
-    for (const colCluster of columnClusters) {
-      // Find the item in this row that is closest to this column position
-      let bestItem = null;
-      let bestDist = Infinity;
-      for (const item of row.items) {
-        const dist = Math.abs(item.x - colCluster.center);
-        if (dist < bestDist && dist < colCluster.tolerance + 30) {
-          bestDist = dist;
-          bestItem = item;
-        }
-      }
-
-      tableRow.push(
-        bestItem
-          ? {
-              text: bestItem.str.trim(),
-              bold: row.block ? row.block.bold : false,
-              fontSize: row.block ? row.block.fontSize : 12,
-              alignment: 'left',
-            }
-          : null
-      );
-    }
-
-    // Only add rows that have at least one non-null cell
-    if (tableRow.some(Boolean)) {
-      tableRows.push(tableRow);
-      if (row.block) {
-        usedBlockIndices.add(blocks.indexOf(row.block));
-      }
-    }
-  }
-
-  if (tableRows.length < 2) {
-    return { tables: [], remaining: blocks };
-  }
-
-  // Calculate fill ratio
-  const totalCells = tableRows.length * columnClusters.length;
-  const filledCells = tableRows.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
-  const fillRatio = totalCells > 0 ? filledCells / totalCells : 0;
-
-  if (fillRatio < 0.4 || filledCells < 4) {
-    return { tables: [], remaining: blocks };
-  }
-
-  const table = {
-    type: 'table',
-    rows: tableRows,
-    columns: columnClusters.length,
-    columnPositions: columnClusters.map((c) => c.center),
-    fillRatio,
-    confidence: Math.min(1, fillRatio * (columnClusters.length / 2)),
-  };
-
-  // Remaining blocks are those not consumed by the table
   const remaining = blocks.filter((_, idx) => !usedBlockIndices.has(idx));
 
-  return { tables: [table], remaining };
+  return { tables: allTables, remaining };
+}
+
+/**
+ * Find stable column positions from candidate blocks.
+ */
+function findColumnPositions(candidateBlocks, pageWidth) {
+  const xPositions = [];
+
+  for (const block of candidateBlocks) {
+    if (!block.lines) continue;
+    for (const line of block.lines) {
+      const items = (line.items || []).filter((it) => it.str && it.str.trim().length > 0);
+      if (items.length < 2) continue;
+
+      // Check items span enough of the page
+      const minX = Math.min(...items.map((it) => it.x));
+      const maxX = Math.max(...items.map((it) => it.x));
+      if (maxX - minX < pageWidth * 0.25) continue;
+
+      for (const item of items) {
+        xPositions.push(item.x);
+      }
+    }
+  }
+
+  if (xPositions.length < 6) return [];
+
+  const clusters = clusterValues(xPositions, 18);
+  // Only keep columns that appear in at least 3 lines
+  return clusters.filter((c) => c.count >= 3).sort((a, b) => a.center - b.center);
+}
+
+/**
+ * Extract table rows from candidate blocks using column positions.
+ */
+function extractTableRows(candidateBlocks, columnPositions, usedBlockIndices) {
+  const rows = [];
+
+  for (const block of candidateBlocks) {
+    if (!block.lines || block.lines.length === 0) continue;
+
+    for (const line of block.lines) {
+      const items = (line.items || []).filter((it) => it.str && it.str.trim().length > 0);
+      if (items.length < 2) continue;
+
+      // Build one row per line
+      const row = [];
+      for (const col of columnPositions) {
+        let bestItem = null;
+        let bestDist = Infinity;
+        for (const item of items) {
+          const dist = Math.abs(item.x - col.center);
+          if (dist < 30 && dist < bestDist) {
+            bestDist = dist;
+            bestItem = item;
+          }
+        }
+        row.push(
+          bestItem
+            ? { text: bestItem.str.trim(), bold: block.bold || false, fontSize: block.fontSize || 12, alignment: 'left' }
+            : null
+        );
+      }
+
+      // Only add rows with at least 2 non-empty cells
+      if (row.filter(Boolean).length >= 2) {
+        rows.push(row);
+        usedBlockIndices.add(candidateBlocks.indexOf(block));
+      }
+    }
+  }
+
+  return rows;
 }
 
 /**
  * Cluster numeric values by proximity.
- * Count represents how many input values fall into this cluster.
- * Returns array of { center, count, tolerance }
  */
 function clusterValues(values, tolerance) {
   if (values.length === 0) return [];
 
-  // Keep all values (including duplicates from different rows) and sort
   const sorted = [...values].sort((a, b) => a - b);
   const clusters = [];
-  let currentCluster = [sorted[0]];
+  let current = [sorted[0]];
 
   for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i] - currentCluster[currentCluster.length - 1] <= tolerance) {
-      currentCluster.push(sorted[i]);
+    if (sorted[i] - current[current.length - 1] <= tolerance) {
+      current.push(sorted[i]);
     } else {
       clusters.push({
-        center: currentCluster.reduce((s, v) => s + v, 0) / currentCluster.length,
-        count: currentCluster.length,
-        tolerance,
+        center: current.reduce((s, v) => s + v, 0) / current.length,
+        count: current.length,
       });
-      currentCluster = [sorted[i]];
+      current = [sorted[i]];
     }
   }
   clusters.push({
-    center: currentCluster.reduce((s, v) => s + v, 0) / currentCluster.length,
-    count: currentCluster.length,
-    tolerance,
+    center: current.reduce((s, v) => s + v, 0) / current.length,
+    count: current.length,
   });
 
-  return clusters.filter((c) => c.count >= 2); // At least 2 items to form a column
+  return clusters;
 }
 
 module.exports = { detectTables };
