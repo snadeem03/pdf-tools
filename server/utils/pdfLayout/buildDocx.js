@@ -30,6 +30,9 @@ const {
   convertInchesToTwip,
   Header,
   Footer,
+  Numbering,
+  LevelFormat,
+  convertMillimetersToTwip,
 } = require('docx');
 
 const { mapFontName, fontSizeToHalfPoints, classifyFontSizes } = require('./analyzeTypography');
@@ -68,8 +71,8 @@ async function buildDocx(pages, options = {}) {
   // Extract headers and footers from all pages
   const headerFooter = extractHeaderFooter(pages);
 
-  // Compute default margins (approximate from typical PDF margins)
-  const defaultMargin = convertInchesToTwip(1);
+  // Compute actual margins from page content
+  const pageMargins = computePageMargins(pages);
 
   const sections = [];
 
@@ -80,6 +83,8 @@ async function buildDocx(pages, options = {}) {
 
     const sectionWidth = Math.round((pageWidth / 72) * 1440);
     const sectionHeight = Math.round((pageHeight / 72) * 1440);
+
+    const margins = pageMargins[pageIdx] || { top: 720, bottom: 720, left: 708, right: 708 };
 
     const children = [];
 
@@ -118,10 +123,10 @@ async function buildDocx(pages, options = {}) {
             height: sectionHeight,
           },
           margin: {
-            top: defaultMargin,
-            bottom: defaultMargin,
-            left: defaultMargin,
-            right: defaultMargin,
+            top: margins.top,
+            bottom: margins.bottom,
+            left: margins.left,
+            right: margins.right,
           },
         },
       },
@@ -147,7 +152,6 @@ async function buildDocx(pages, options = {}) {
     sections.push(sectionConfig);
   }
 
-  // If no sections were created (empty PDF), add a minimal one
   if (sections.length === 0) {
     sections.push({
       properties: {},
@@ -164,10 +168,65 @@ async function buildDocx(pages, options = {}) {
   const doc = new Document({
     creator: 'PDFNova',
     title: 'Converted from PDF',
+    numbering: {
+      config: [
+        {
+          reference: 'pdf-list',
+          levels: [
+            {
+              level: 0,
+              format: LevelFormat.BULLET,
+              text: '\u2022',
+              alignment: AlignmentType.LEFT,
+              style: {
+                paragraph: {
+                  indent: { left: convertMillimetersToTwip(12.7), hanging: convertMillimetersToTwip(6.35) },
+                },
+              },
+            },
+          ],
+        },
+      ],
+    },
     sections,
   });
 
   return Packer.toBuffer(doc);
+}
+
+/**
+ * Compute actual page margins from block positions.
+ */
+function computePageMargins(pages) {
+  const result = [];
+
+  for (const page of pages) {
+    const blocks = page.blocks || [];
+    if (blocks.length === 0) {
+      result.push({ top: 720, bottom: 720, left: 708, right: 708 });
+      continue;
+    }
+
+    const allLeftX = blocks.map((b) => b.leftX).filter((x) => x > 0).sort((a, b) => a - b);
+    const allRightX = blocks.map((b) => b.rightX).filter((x) => x > 0).sort((a, b) => b - a);
+    const allTopY = blocks.map((b) => b.topY).sort((a, b) => b - a);
+    const allBottomY = blocks.map((b) => b.bottomY).sort((a, b) => a - b);
+
+    // Use 10th percentile for margins
+    const leftPt = allLeftX[Math.floor(allLeftX.length * 0.1)] || 72;
+    const rightPt = allRightX[Math.floor(allRightX.length * 0.1)] || (page.width - 72);
+    const topPt = allTopY[Math.floor(allTopY.length * 0.1)] || (page.height - 72);
+    const bottomPt = allBottomY[Math.floor(allBottomY.length * 0.1)] || 72;
+
+    result.push({
+      top: Math.round(((page.height - topPt) / 72) * 1440),
+      bottom: Math.round((bottomPt / 72) * 1440),
+      left: Math.round((leftPt / 72) * 1440),
+      right: Math.round(((page.width - rightPt) / 72) * 1440),
+    });
+  }
+
+  return result;
 }
 
 /**
@@ -282,15 +341,30 @@ function buildParagraph(block, bodySize, typographyContext) {
   if (!block || !block.text || !block.text.trim()) return null;
 
   const isHeading = block.isHeading && block.headingLevel > 0;
-  const headingLevel = isHeading ? HEADING_LEVELS[Math.min(block.headingLevel, 4)] : undefined;
+  const isTitle = block.zone === 'TITLE';
+  const isSubtitle = block.zone === 'SUBTITLE';
+
+  let headingLevel;
+  if (isTitle) {
+    headingLevel = 'title';
+  } else if (isHeading) {
+    headingLevel = HEADING_LEVELS[Math.min(block.headingLevel, 4)];
+  }
 
   const halfPoints = fontSizeToHalfPoints(block.fontSize);
   const fontName = mapFontName(block.fontName, typographyContext);
   const alignment = ALIGN_MAP[block.alignment] || AlignmentType.LEFT;
 
-  // Spacing estimation
-  const spacingBefore = isHeading ? Math.round(bodySize * 40) : 0;
-  const spacingAfter = isHeading ? Math.round(bodySize * 20) : 120;
+  // Spacing: titles get less before/after, headings get more
+  let spacingBefore = 0;
+  let spacingAfter = 120;
+  if (headingLevel === 'title') {
+    spacingBefore = 0;
+    spacingAfter = 120;
+  } else if (isHeading) {
+    spacingBefore = Math.round(bodySize * 40);
+    spacingAfter = Math.round(bodySize * 20);
+  }
 
   const runs = buildTextRuns(block, fontName, halfPoints, typographyContext);
 
@@ -304,8 +378,18 @@ function buildParagraph(block, bodySize, typographyContext) {
     },
   };
 
-  if (isHeading && headingLevel) {
+  if (headingLevel === 'title') {
+    paragraphConfig.style = 'Title';
+  } else if (isHeading && headingLevel) {
     paragraphConfig.heading = headingLevel;
+  }
+
+  // List items: use Word numbering
+  if (block.isListItem && block.listItemType === 'bullet') {
+    paragraphConfig.numbering = {
+      reference: 'pdf-list',
+      level: 0,
+    };
   }
 
   // Indentation
@@ -320,26 +404,47 @@ function buildParagraph(block, bodySize, typographyContext) {
 
 /**
  * Build TextRuns for a block.
+ * Merges adjacent items with the same formatting into single runs,
+ * preventing character-level fragmentation.
  */
 function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
   const runs = [];
 
   if (block.lines && block.lines.length > 0) {
+    const mergedItems = [];
+
     for (const line of block.lines) {
       for (const item of line.items) {
-        if (item.str && item.str.trim()) {
-          const itemFont = mapFontName(item.fontName, typographyContext);
-          runs.push(
-            new TextRun({
-              text: item.str,
-              font: itemFont,
-              size: fontSizeToHalfPoints(item.fontSize || block.fontSize),
-              bold: block.bold || false,
-              italics: block.italic || false,
-            })
-          );
+        if (!item.str) continue;
+
+        const itemFont = mapFontName(item.fontName, typographyContext);
+        const itemSize = fontSizeToHalfPoints(item.fontSize || block.fontSize);
+        const itemBold = block.bold || false;
+        const itemItalic = block.italic || false;
+        const key = `${itemFont}_${itemSize}_${itemBold}_${itemItalic}`;
+
+        if (mergedItems.length > 0) {
+          const last = mergedItems[mergedItems.length - 1];
+          if (last.key === key) {
+            last.text += item.str;
+            continue;
+          }
         }
+
+        mergedItems.push({ key, text: item.str, font: itemFont, size: itemSize, bold: itemBold, italic: itemItalic });
       }
+    }
+
+    for (const mi of mergedItems) {
+      runs.push(
+        new TextRun({
+          text: mi.text,
+          font: mi.font,
+          size: mi.size,
+          bold: mi.bold,
+          italics: mi.italic,
+        })
+      );
     }
   }
 

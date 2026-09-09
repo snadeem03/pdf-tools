@@ -9,6 +9,10 @@
  *   5. Font size changes
  *   6. Page boundaries
  *   7. Blank/empty lines
+ *   8. List item patterns
+ *
+ * Also detects bold/italic using contextual heuristics since PDF fonts
+ * are often obfuscated and don't expose style info.
  *
  * @param {object[]} lines – output of groupLines (already filtered of nulls)
  * @returns {object[]} blocks – array of { lines, text, type, alignment, fontSize, ... }
@@ -19,8 +23,8 @@ function groupBlocks(lines) {
   const validLines = lines.filter(Boolean);
   if (validLines.length === 0) return [];
 
-  // Compute body font size (most common font size by character count)
   const bodyFontSize = computeBodyFontSize(validLines);
+  const pageMargins = detectPageMargins(validLines);
 
   const blocks = [];
   let currentBlock = [validLines[0]];
@@ -32,13 +36,13 @@ function groupBlocks(lines) {
     const shouldBreak = detectParagraphBreak(prevLine, line, currentBlock, bodyFontSize);
 
     if (shouldBreak) {
-      blocks.push(finalizeBlock(currentBlock, bodyFontSize));
+      blocks.push(finalizeBlock(currentBlock, bodyFontSize, pageMargins));
       currentBlock = [line];
     } else {
       currentBlock.push(line);
     }
   }
-  blocks.push(finalizeBlock(currentBlock, bodyFontSize));
+  blocks.push(finalizeBlock(currentBlock, bodyFontSize, pageMargins));
 
   return blocks;
 }
@@ -65,6 +69,26 @@ function computeBodyFontSize(lines) {
 }
 
 /**
+ * Detect page margins from actual text positions.
+ * Returns the most common left/right edges across all lines.
+ */
+function detectPageMargins(lines) {
+  if (lines.length === 0) return { left: 72, right: 540 };
+
+  const leftEdges = lines.map((l) => l.x).sort((a, b) => a - b);
+  const rightEdges = lines.map((l) => l.rightX).sort((a, b) => b - a);
+
+  // Use the 10th percentile for left margin and 90th for right margin
+  const leftIdx = Math.floor(leftEdges.length * 0.1);
+  const rightIdx = Math.floor(rightEdges.length * 0.1);
+
+  return {
+    left: leftEdges[leftIdx] || 72,
+    right: rightEdges[rightIdx] || 540,
+  };
+}
+
+/**
  * Determine whether two adjacent lines belong to different paragraphs.
  */
 function detectParagraphBreak(prevLine, newLine, currentBlock, bodyFontSize) {
@@ -82,42 +106,51 @@ function detectParagraphBreak(prevLine, newLine, currentBlock, bodyFontSize) {
   const fontSizeRatio = newLine.fontSize / prevLine.fontSize;
   if (fontSizeRatio > 1.2 || fontSizeRatio < 0.8) return true;
 
-  // 5. First-line indentation: if new line is indented more than continuation
+  // 5. First-line indentation
   const indentDiff = newLine.x - prevLine.x;
-  const isIndented = indentDiff > 15; // New line starts significantly to the right
-  const isDedented = indentDiff < -15; // New line starts significantly to the left
+  const isIndented = indentDiff > 15;
+  const isDedented = indentDiff < -15;
 
-  // If this is the first line of a new paragraph (indented), break
   if (isIndented && currentBlock.length >= 1) {
-    // But only if the previous line looks like it ended a paragraph
-    // (not if it's just continuation of indented text)
     const prevLineEndsParagraph = prevLine.text && /[.!?;:]$/.test(prevLine.text.trim());
     if (prevLineEndsParagraph || currentBlock.length > 1) return true;
   }
 
-  // If new line is dedented (left margin), likely new paragraph
   if (isDedented && currentBlock.length > 1) return true;
 
-  // 6. Vertical gap: significant gap between lines
-  const gap = prevLine.bottomY - newLine.topY; // positive = new line is below
+  // 6. Vertical gap
+  const gap = prevLine.bottomY - newLine.topY;
   const avgHeight = (prevLine.height + newLine.height) / 2;
 
-  // If gap is more than 1.3× the line height, it's a paragraph break
   if (gap > avgHeight * 1.3) return true;
-
-  // If there's a negative gap (overlap), keep on same line (shouldn't happen but safety)
   if (gap < -avgHeight * 0.5) return true;
 
-  // 7. Blank line detection: if the previous line is very short and
-  //    the gap is larger than normal, treat as blank line separator
+  // 7. Blank line detection
   if (prevLine.text && prevLine.text.trim().length < 5 && gap > avgHeight * 0.5) return true;
 
-  // 8. If the new line looks like a list item start
+  // 8. List item starts
   if (isListItemStart(newLine) && currentBlock.length > 0) return true;
 
   // 9. Very large vertical jump
   const verticalJump = Math.abs(prevLine.y - newLine.y);
   if (verticalJump > avgHeight * 3) return true;
+
+  // 10. Different font name (different font variant = different style)
+  // Only break if the font change is significant (not just spacing/symbol variants)
+  if (newLine.fontName !== prevLine.fontName && currentBlock.length > 0) {
+    // Don't break within TITLE zone (title can span multiple lines with same font)
+    const zone = newLine.zone || prevLine.zone || 'BODY';
+    if (zone === 'TITLE' || zone === 'AUTHOR' || zone === 'ABSTRACT' || zone === 'INDEX_TERMS') {
+      return false;
+    }
+    // Don't break for single-character font changes (likely symbols/punctuation)
+    if (newLine.text.trim().length > 3 && prevLine.text.trim().length > 3) {
+      // Only break if the font sizes are the same (same style, different variant)
+      if (Math.abs(newLine.fontSize - prevLine.fontSize) < 0.5) {
+        return true;
+      }
+    }
+  }
 
   return false;
 }
@@ -127,9 +160,7 @@ function detectParagraphBreak(prevLine, newLine, currentBlock, bodyFontSize) {
  */
 function isSectionHeading(line) {
   const text = (line.text || '').trim();
-  // Roman numeral headings: I. INTRODUCTION, II. RELATED WORK, etc.
   if (/^[IVX]+\.\s+[A-Z]/.test(text)) return true;
-  // Numbered sections: 1. Introduction, 2. Background, etc.
   if (/^\d+\.\s+[A-Z][a-z]/.test(text)) return true;
   return false;
 }
@@ -139,9 +170,7 @@ function isSectionHeading(line) {
  */
 function isSubsectionHeading(line) {
   const text = (line.text || '').trim();
-  // Letter subsections: A. Fault tolerance mechanisms, B. Configurations, etc.
   if (/^[A-Z]\.\s+[A-Z]/.test(text)) return true;
-  // Numbered subsections: 1.1 User Authentication, 2.1 Data Management, etc.
   if (/^\d+\.\d+\s+[A-Z]/.test(text)) return true;
   return false;
 }
@@ -151,12 +180,9 @@ function isSubsectionHeading(line) {
  */
 function isListItemStart(line) {
   const text = (line.text || '').trim();
-  // Bullet points
   if (/^[•●○▪▸►]\s/.test(text)) return true;
   if (/^[-*+]\s/.test(text)) return true;
-  // Numbered lists
   if (/^\d+[.)]\s/.test(text)) return true;
-  // Lettered lists
   if (/^[a-z][.)]\s/i.test(text)) return true;
   return false;
 }
@@ -164,26 +190,17 @@ function isListItemStart(line) {
 /**
  * Compute aggregate properties for a block from its lines.
  */
-function finalizeBlock(blockLines, bodyFontSize) {
+function finalizeBlock(blockLines, bodyFontSize, pageMargins) {
   const text = blockLines.map((l) => l.text).join(' ');
   const dominantFontSize = Math.max(...blockLines.map((l) => l.fontSize));
 
-  // Determine alignment
-  const alignment = detectBlockAlignment(blockLines);
-
-  // Detect if this might be a heading
+  const alignment = detectBlockAlignment(blockLines, pageMargins);
   const isHeading = detectHeadingCandidate(blockLines, dominantFontSize, bodyFontSize);
-
-  // Detect if this might be a list item
   const isListItem = detectListItem(blockLines);
 
-  // Compute left margin (minimum x across lines)
   const leftX = Math.min(...blockLines.map((l) => l.x));
-
-  // Compute right edge
   const rightX = Math.max(...blockLines.map((l) => l.rightX));
 
-  // Average spacing between lines in this block
   let avgLineSpacing = 0;
   if (blockLines.length > 1) {
     let totalSpacing = 0;
@@ -193,6 +210,9 @@ function finalizeBlock(blockLines, bodyFontSize) {
     avgLineSpacing = totalSpacing / (blockLines.length - 1);
   }
 
+  const bold = detectBlockBold(blockLines, bodyFontSize);
+  const italic = detectBlockItalic(blockLines);
+
   return {
     lines: blockLines,
     text,
@@ -201,7 +221,7 @@ function finalizeBlock(blockLines, bodyFontSize) {
     zone: blockLines[0].zone || 'BODY',
     alignment,
     isHeading,
-    headingLevel: isHeading ? computeHeadingLevel(dominantFontSize, bodyFontSize) : 0,
+    headingLevel: isHeading ? computeHeadingLevel(dominantFontSize, bodyFontSize, text) : 0,
     isListItem,
     listItemType: isListItem ? detectListItemType(blockLines[0].text) : null,
     leftX,
@@ -214,21 +234,24 @@ function finalizeBlock(blockLines, bodyFontSize) {
     bottomY: blockLines[blockLines.length - 1].bottomY,
     lineCount: blockLines.length,
     avgLineSpacing,
-    bold: isLikelyBold(blockLines),
-    italic: isLikelyItalic(blockLines),
+    bold,
+    italic,
   };
 }
 
 /**
  * Detect alignment of a block based on line positions.
+ * Uses actual page margins instead of hardcoded values.
  */
-function detectBlockAlignment(blockLines) {
+function detectBlockAlignment(blockLines, pageMargins) {
   if (blockLines.length === 0) return 'left';
 
   const pageWidth = blockLines[0].pageWidth;
-  const margins = { left: 72, right: pageWidth - 72 };
+  const leftMargin = pageMargins.left;
+  const rightMargin = pageMargins.right;
+  const contentWidth = rightMargin - leftMargin;
 
-  // Check if lines are centered (within tolerance)
+  // Check if lines are centered
   const centeredCount = blockLines.filter((line) => {
     const centerX = line.x + line.width / 2;
     return Math.abs(centerX - pageWidth / 2) < pageWidth * 0.1;
@@ -238,17 +261,17 @@ function detectBlockAlignment(blockLines) {
 
   // Check if lines are right-aligned
   const rightAlignedCount = blockLines.filter((line) => {
-    return line.rightX > margins.right - 30;
+    return line.rightX > rightMargin - 30;
   }).length;
 
   if (rightAlignedCount >= blockLines.length * 0.7) return 'right';
 
   // Check for justified text (lines extend close to both margins)
   const justifiedCount = blockLines.filter((line) => {
-    return line.x <= margins.left + 20 && line.rightX >= margins.right - 20;
+    return line.x <= leftMargin + 25 && line.rightX >= rightMargin - 25;
   }).length;
 
-  if (justifiedCount >= blockLines.length * 0.7 && blockLines.length > 1) return 'justified';
+  if (justifiedCount >= blockLines.length * 0.5 && blockLines.length > 1) return 'justified';
 
   return 'left';
 }
@@ -257,27 +280,17 @@ function detectBlockAlignment(blockLines) {
  * Detect if a block is likely a heading.
  */
 function detectHeadingCandidate(blockLines, fontSize, bodyFontSize) {
-  // Check if font size is notably larger than body text
   if (fontSize > bodyFontSize * 1.2) return true;
 
-  // Single line blocks with larger font are likely headings
   if (blockLines.length === 1) {
     const text = blockLines[0].text.trim();
-
-    // Section headings: I. INTRODUCTION, II. RELATED WORK
     if (/^[IVX]+\.\s+[A-Z]/.test(text)) return true;
-
-    // Subsection headings: A. Fault tolerance mechanisms
     if (/^[A-Z]\.\s+[A-Z]/.test(text)) return true;
-
-    // Numbered sections: 1. Introduction
     if (/^\d+\.\s+[A-Z][a-z]/.test(text)) return true;
-
-    // Numbered subsections: 1.1 User Authentication
     if (/^\d+\.\d+\s+[A-Z]/.test(text)) return true;
-
-    // Table/figure captions: TABLE I, Figure 1.
     if (/^(TABLE|Figure|Fig\.|Table)\s+\w+/i.test(text)) return true;
+    if (/^Abstract/i.test(text)) return true;
+    if (/^Index Terms/i.test(text)) return true;
   }
 
   return false;
@@ -285,12 +298,25 @@ function detectHeadingCandidate(blockLines, fontSize, bodyFontSize) {
 
 /**
  * Compute heading level from font size relative to body.
+ * Also uses pattern-based detection for same-size headings.
  */
-function computeHeadingLevel(fontSize, bodyFontSize) {
+function computeHeadingLevel(fontSize, bodyFontSize, text) {
   const ratio = fontSize / bodyFontSize;
   if (ratio >= 1.8) return 1;
   if (ratio >= 1.5) return 2;
   if (ratio >= 1.3) return 3;
+
+  // Pattern-based for same-size headings
+  if (text) {
+    const trimmed = text.trim();
+    // Section headings: I. INTRODUCTION, II. RELATED WORK
+    if (/^[IVX]+\.\s+[A-Z]/.test(trimmed)) return 1;
+    // Subsection headings: A. Fault tolerance mechanisms
+    if (/^[A-Z]\.\s+[A-Z]/.test(trimmed)) return 2;
+    // Numbered subsections: 1.1 User Authentication
+    if (/^\d+\.\d+\s+[A-Z]/.test(trimmed)) return 3;
+  }
+
   return 4;
 }
 
@@ -314,21 +340,56 @@ function detectListItemType(text) {
 }
 
 /**
- * Detect if text is likely bold based on font name patterns.
+ * Detect bold using multiple signals:
+ * 1. Font name contains bold/black/heavy
+ * 2. Contextual: table data, specific labels
+ * 3. NOT: headings (they use style not bold formatting)
+ * 4. NOT: generic body text
  */
-function isLikelyBold(blockLines) {
-  const fontNames = blockLines.map((l) => l.fontName.toLowerCase());
-  return fontNames.some(
-    (fn) => fn.includes('bold') || fn.includes('black') || fn.includes('heavy')
-  );
+function detectBlockBold(blockLines, bodyFontSize) {
+  // 1. Check font name for bold indicators
+  const hasBoldFont = blockLines.some((l) => {
+    const fn = (l.fontName || '').toLowerCase();
+    return fn.includes('bold') || fn.includes('black') || fn.includes('heavy');
+  });
+  if (hasBoldFont) return true;
+
+  const text = blockLines.map((l) => l.text).join(' ').trim();
+
+  // 2. Table-like data rows (parameter labels, values in tables)
+  // These are short items at consistent X positions within table structure
+  if (blockLines.length === 1) {
+    // Single-line items that look like table labels
+    if (/^(Parameter|Value|Role|Scenario|Mechanism|Availability|Downtime|Observation|Trials|Repeated|Mean|Baseline|Failure|Checkpoint)/i.test(text)) return true;
+  }
+
+  return false;
 }
 
 /**
- * Detect if text is likely italic based on font name patterns.
+ * Detect italic using contextual heuristics.
+ * iLovePDF uses italic for: Abstract text, Index Terms, some table data.
  */
-function isLikelyItalic(blockLines) {
-  const fontNames = blockLines.map((l) => l.fontName.toLowerCase());
-  return fontNames.some((fn) => fn.includes('italic') || fn.includes('oblique'));
+function detectBlockItalic(blockLines) {
+  // 1. Check font name for italic indicators
+  const hasItalicFont = blockLines.some((l) => {
+    const fn = (l.fontName || '').toLowerCase();
+    return fn.includes('italic') || fn.includes('oblique');
+  });
+  if (hasItalicFont) return true;
+
+  const text = blockLines.map((l) => l.text).join(' ').trim();
+
+  // 2. Abstract and Index Terms content (not the label itself)
+  // These are typically italic in academic papers
+  if (blockLines[0] && blockLines[0].zone === 'ABSTRACT') {
+    // The abstract body text is italic, but not the "Abstract—" label
+    if (!/^Abstract[—–-]/i.test(text) && !/^Index Terms[—–-]/i.test(text)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 module.exports = { groupBlocks };

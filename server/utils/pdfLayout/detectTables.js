@@ -48,6 +48,7 @@ function detectTables(blocks, pageWidth) {
         type: 'table',
         rows: tableRows,
         columns: columnPositions.length,
+        columnPositions: columnPositions.map((c) => c.center),
         confidence: 0.85,
         headerText: header.text.substring(0, 60),
       });
@@ -116,7 +117,7 @@ function extractTableRows(candidateBlocks, columnPositions, usedBlockIndices) {
         }
         row.push(
           bestItem
-            ? { text: bestItem.str.trim(), bold: block.bold || false, fontSize: block.fontSize || 12, alignment: 'left' }
+            ? { text: bestItem.str.trim(), bold: true, fontSize: block.fontSize || 12, alignment: 'left' }
             : null
         );
       }
