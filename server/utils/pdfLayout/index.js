@@ -19,6 +19,7 @@ const { classifyZones } = require('./classifyZones');
 const { groupBlocks } = require('./groupBlocks');
 const { detectTables } = require('./detectTables');
 const { buildDocx } = require('./buildDocx');
+const { analyzeDocumentTypography } = require('./analyzeTypography');
 
 /**
  * Convert a PDF buffer to a DOCX buffer with layout preservation.
@@ -49,11 +50,19 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
     console.log(`[pdfLayout] Extracted ${allItems.length} items from ${pages.length} pages`);
   }
 
+  // Stage 2: Analyze document typography (before processing)
+  const typographyContext = analyzeDocumentTypography(pages);
+
+  if (debug) {
+    // eslint-disable-next-line no-console
+    console.log(`[pdfLayout] Typography: serif=${typographyContext.serifDetected}, default=${typographyContext.defaultFont}, obfuscated=${typographyContext.isObfuscated}`);
+  }
+
   // Process each page
   const processedPages = [];
 
   for (const page of pages) {
-    const pageResult = processPage(page, { debug });
+    const pageResult = processPage(page, { debug, typographyContext });
     processedPages.push(pageResult);
 
     stats.totalLines += pageResult.lines.length;
@@ -76,17 +85,8 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
     console.log(`[pdfLayout] Zone classification:`, JSON.stringify(zoneCounts, null, 2));
   }
 
-  for (const page of pages) {
-    const pageResult = processPage(page, { debug });
-    processedPages.push(pageResult);
-
-    stats.totalLines += pageResult.lines.length;
-    stats.totalBlocks += pageResult.blocks.length;
-    stats.tablesDetected += pageResult.tables.length;
-  }
-
   // Stage 7: Build DOCX
-  const buffer = await buildDocx(processedPages);
+  const buffer = await buildDocx(processedPages, { typographyContext });
 
   if (debug) {
     // eslint-disable-next-line no-console
@@ -100,7 +100,7 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
  * Process a single page through the layout pipeline.
  */
 function processPage(page, options = {}) {
-  const { debug = false } = options;
+  const { debug = false, typographyContext = {} } = options;
 
   // Stage 2: Group text items into lines
   const lines = groupLines(page.items, page.height).filter(Boolean);

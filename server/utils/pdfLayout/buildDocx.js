@@ -51,9 +51,12 @@ const ALIGN_MAP = {
  * Build a complete DOCX document from analyzed page data.
  *
  * @param {object[]} pages – array of { blocks: object[], tables: object[], width, height, pageIndex }
+ * @param {object} [options]
+ * @param {object} [options.typographyContext] – typography analysis results
  * @returns {Promise<Buffer>} – DOCX file buffer
  */
-async function buildDocx(pages) {
+async function buildDocx(pages, options = {}) {
+  const { typographyContext = {} } = options;
   // Classify font sizes across all blocks
   const allBlocks = pages.flatMap((p) => p.blocks || []);
   const { bodySize } = classifyFontSizes(allBlocks);
@@ -87,7 +90,7 @@ async function buildDocx(pages) {
           children.push(new Paragraph({ spacing: { after: 120 }, children: [] }));
         }
       } else {
-        const paragraph = buildParagraph(element, bodySize);
+        const paragraph = buildParagraph(element, bodySize, typographyContext);
         if (paragraph) children.push(paragraph);
       }
     }
@@ -169,7 +172,7 @@ function mergeElements(page) {
 /**
  * Build a docx Paragraph from a text block.
  */
-function buildParagraph(block, bodySize) {
+function buildParagraph(block, bodySize, typographyContext) {
   if (!block || !block.text || !block.text.trim()) return null;
 
   const isHeading = block.isHeading && block.headingLevel > 0;
@@ -178,8 +181,8 @@ function buildParagraph(block, bodySize) {
   // Font size
   const halfPoints = fontSizeToHalfPoints(block.fontSize);
 
-  // Font name
-  const fontName = mapFontName(block.fontName);
+  // Font name (with typography context for better mapping)
+  const fontName = mapFontName(block.fontName, typographyContext);
 
   // Alignment
   const alignment = ALIGN_MAP[block.alignment] || AlignmentType.LEFT;
@@ -189,7 +192,7 @@ function buildParagraph(block, bodySize) {
   const spacingAfter = isHeading ? Math.round(bodySize * 20) : 120;
 
   // Build TextRuns for the paragraph
-  const runs = buildTextRuns(block, fontName, halfPoints);
+  const runs = buildTextRuns(block, fontName, halfPoints, typographyContext);
 
   const paragraphConfig = {
     children: runs,
@@ -220,7 +223,7 @@ function buildParagraph(block, bodySize) {
  * Currently creates a single run; could be extended for mixed formatting
  * within a single block (e.g., bold labels + regular values).
  */
-function buildTextRuns(block, fontFamily, halfPoints) {
+function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
   const runs = [];
 
   // Check if this block has items with mixed formatting
@@ -228,10 +231,11 @@ function buildTextRuns(block, fontFamily, halfPoints) {
     for (const line of block.lines) {
       for (const item of line.items) {
         if (item.str && item.str.trim()) {
+          const itemFont = mapFontName(item.fontName, typographyContext);
           runs.push(
             new TextRun({
               text: item.str,
-              font: fontFamily,
+              font: itemFont,
               size: fontSizeToHalfPoints(item.fontSize || block.fontSize),
               bold: block.bold || false,
               italics: block.italic || false,
