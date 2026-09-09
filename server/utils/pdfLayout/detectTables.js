@@ -117,7 +117,7 @@ function extractTableRows(candidateBlocks, columnPositions, usedBlockIndices) {
         }
         row.push(
           bestItem
-            ? { text: bestItem.str.trim(), bold: true, italic: true, fontSize: block.fontSize || 12, alignment: 'left' }
+            ? { text: bestItem.str.trim(), bold: false, italic: false, fontSize: block.fontSize || 12, alignment: 'left' }
             : null
         );
       }

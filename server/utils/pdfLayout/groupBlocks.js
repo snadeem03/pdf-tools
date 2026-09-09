@@ -268,6 +268,15 @@ function finalizeBlock(blockLines, bodyFontSize, pageMargins) {
 /**
  * Detect alignment of a block based on line positions.
  * Uses actual page margins instead of hardcoded values.
+ *
+ * Priority order:
+ *   1. Justified – lines extend close to both left and right margins
+ *   2. Centered – narrow text centered on page (title, author block)
+ *   3. Right-aligned
+ *   4. Left-aligned (default)
+ *
+ * Justified must be checked BEFORE centered because wide body text
+ * spanning both margins always has its centerX near page center.
  */
 function detectBlockAlignment(blockLines, pageMargins) {
   if (blockLines.length === 0) return 'left';
@@ -277,27 +286,42 @@ function detectBlockAlignment(blockLines, pageMargins) {
   const rightMargin = pageMargins.right;
   const contentWidth = rightMargin - leftMargin;
 
-  // Check if lines are centered
+  // 1. Check for justified text FIRST (lines extend close to both margins)
+  //    Use relaxed matching: line left edge within 35pt of left margin AND
+  //    line right edge within 35pt of right margin
+  const justifiedCount = blockLines.filter((line) => {
+    const nearLeft = line.x <= leftMargin + 35;
+    const nearRight = line.rightX >= rightMargin - 35;
+    return nearLeft && nearRight;
+  }).length;
+
+  // For multi-line blocks, if most lines span both margins, it's justified
+  if (blockLines.length > 1 && justifiedCount >= blockLines.length * 0.4) return 'justified';
+
+  // For single-line blocks, check if it spans most of the content width
+  if (blockLines.length === 1) {
+    const line = blockLines[0];
+    const lineWidth = line.rightX - line.x;
+    if (lineWidth > contentWidth * 0.7) return 'justified';
+  }
+
+  // 2. Check if lines are centered (narrow text centered on page)
+  //    Must check that text is NOT wide (otherwise it's justified, not centered)
   const centeredCount = blockLines.filter((line) => {
     const centerX = line.x + line.width / 2;
-    return Math.abs(centerX - pageWidth / 2) < pageWidth * 0.1;
+    const isNearCenter = Math.abs(centerX - pageWidth / 2) < pageWidth * 0.1;
+    const isNarrow = line.width < contentWidth * 0.65;
+    return isNearCenter && isNarrow;
   }).length;
 
   if (centeredCount >= blockLines.length * 0.7) return 'center';
 
-  // Check if lines are right-aligned
+  // 3. Check if lines are right-aligned (rare, mostly for specific elements)
   const rightAlignedCount = blockLines.filter((line) => {
-    return line.rightX > rightMargin - 30;
+    return line.rightX > rightMargin - 15 && line.x > leftMargin + 30;
   }).length;
 
   if (rightAlignedCount >= blockLines.length * 0.7) return 'right';
-
-  // Check for justified text (lines extend close to both margins)
-  const justifiedCount = blockLines.filter((line) => {
-    return line.x <= leftMargin + 25 && line.rightX >= rightMargin - 25;
-  }).length;
-
-  if (justifiedCount >= blockLines.length * 0.5 && blockLines.length > 1) return 'justified';
 
   return 'left';
 }
@@ -315,8 +339,8 @@ function detectHeadingCandidate(blockLines, fontSize, bodyFontSize) {
     if (/^\d+\.\s+[A-Z][a-z]/.test(text)) return true;
     if (/^\d+\.\d+\s+[A-Z]/.test(text)) return true;
     if (/^(TABLE|Figure|Fig\.|Table)\s+\w+/i.test(text)) return true;
-    if (/^Abstract/i.test(text)) return true;
-    if (/^Index Terms/i.test(text)) return true;
+    // Do NOT treat "Abstract" or "Index Terms" as headings - they are
+    // styled as italic text in academic papers, not as heading elements
   }
 
   return false;
@@ -327,21 +351,22 @@ function detectHeadingCandidate(blockLines, fontSize, bodyFontSize) {
  * Also uses pattern-based detection for same-size headings.
  */
 function computeHeadingLevel(fontSize, bodyFontSize, text) {
+  // Pattern-based detection takes priority over font-size ratios
+  if (text) {
+    const trimmed = text.trim();
+    // Section headings: I. INTRODUCTION, II. RELATED WORK, III. METHODOLOGY
+    if (/^[IVX]+\.\s+[A-Z]/.test(trimmed)) return 1;
+    // Subsection headings: A. Fault tolerance mechanisms, B. Experimental
+    if (/^[A-Z]\.\s+[A-Z]/.test(trimmed)) return 2;
+    // Numbered subsections: 1.1 User Authentication, 2.3 Results
+    if (/^\d+\.\d+\s+[A-Z]/.test(trimmed)) return 3;
+  }
+
+  // Font-size-based fallback
   const ratio = fontSize / bodyFontSize;
   if (ratio >= 1.8) return 1;
   if (ratio >= 1.5) return 2;
   if (ratio >= 1.3) return 3;
-
-  // Pattern-based for same-size headings
-  if (text) {
-    const trimmed = text.trim();
-    // Section headings: I. INTRODUCTION, II. RELATED WORK
-    if (/^[IVX]+\.\s+[A-Z]/.test(trimmed)) return 1;
-    // Subsection headings: A. Fault tolerance mechanisms
-    if (/^[A-Z]\.\s+[A-Z]/.test(trimmed)) return 2;
-    // Numbered subsections: 1.1 User Authentication
-    if (/^\d+\.\d+\s+[A-Z]/.test(trimmed)) return 3;
-  }
 
   return 4;
 }
@@ -366,54 +391,39 @@ function detectListItemType(text) {
 }
 
 /**
- * Detect bold using multiple signals:
- * 1. Font name contains bold/black/heavy
- * 2. Contextual: table data, specific labels
- * 3. NOT: headings (they use style not bold formatting)
- * 4. NOT: generic body text
+ * Detect bold using font metadata from items.
+ * Checks the actual font descriptor weight for each item.
  */
 function detectBlockBold(blockLines, bodyFontSize) {
-  // 1. Check font name for bold indicators
+  // Check if any item in the block has a bold font (from font descriptor)
   const hasBoldFont = blockLines.some((l) => {
+    // Check items for fontBold property (set from PDF font descriptor)
+    if (l.items) {
+      return l.items.some((item) => item.fontBold);
+    }
+    // Fallback: check font name for bold indicators
     const fn = (l.fontName || '').toLowerCase();
     return fn.includes('bold') || fn.includes('black') || fn.includes('heavy');
   });
-  if (hasBoldFont) return true;
-
-  const text = blockLines.map((l) => l.text).join(' ').trim();
-
-  // 2. Table-like data rows (parameter labels, values in tables)
-  // These are short items at consistent X positions within table structure
-  if (blockLines.length === 1) {
-    // Single-line items that look like table labels
-    if (/^(Parameter|Value|Role|Scenario|Mechanism|Availability|Downtime|Observation|Trials|Repeated|Mean|Baseline|Failure|Checkpoint)/i.test(text)) return true;
-  }
-
-  return false;
+  return hasBoldFont;
 }
 
 /**
- * Detect italic using contextual heuristics.
- * iLovePDF uses italic for: Abstract text, Index Terms, some table data.
+ * Detect italic using font metadata from items.
+ * Checks the actual font descriptor italic angle for each item.
  */
 function detectBlockItalic(blockLines) {
-  // 1. Check font name for italic indicators
+  // Check if any item in the block has an italic font (from font descriptor)
   const hasItalicFont = blockLines.some((l) => {
+    // Check items for fontItalic property (set from PDF font descriptor)
+    if (l.items) {
+      return l.items.some((item) => item.fontItalic);
+    }
+    // Fallback: check font name for italic indicators
     const fn = (l.fontName || '').toLowerCase();
     return fn.includes('italic') || fn.includes('oblique');
   });
-  if (hasItalicFont) return true;
-
-  const text = blockLines.map((l) => l.text).join(' ').trim();
-
-  // 2. Abstract and Index Terms labels (italic in academic papers)
-  if (blockLines[0] && blockLines[0].zone === 'ABSTRACT') {
-    if (/^Abstract[—–\-]/i.test(text) || /^Index Terms[—–\-]/i.test(text)) {
-      return true;
-    }
-  }
-
-  return false;
+  return hasItalicFont;
 }
 
 module.exports = { groupBlocks };

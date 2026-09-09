@@ -27,6 +27,7 @@ const FONT_MAP = {
 
 /**
  * Map a PDF font name to a Word-compatible font name.
+ * Uses font metadata when available for accurate mapping.
  */
 function mapFontName(pdfFontName, context = {}) {
   if (!pdfFontName) return context.defaultFont || 'Arial';
@@ -38,19 +39,38 @@ function mapFontName(pdfFontName, context = {}) {
     if (lower.includes(pattern)) return wordName;
   }
 
-  // Check for common patterns
-  if (lower.includes('bold') && lower.includes('italic')) return context.defaultFont || 'Times New Roman';
-  if (lower.includes('bold')) return context.defaultFont || 'Times New Roman';
-  if (lower.includes('italic') || lower.includes('oblique')) return context.defaultFont || 'Times New Roman';
+  // Use font metadata (baseFont) if available
+  if (context.fontMap && context.fontMap[pdfFontName]) {
+    const fontInfo = context.fontMap[pdfFontName];
+    const baseFont = (fontInfo.baseFont || '').toLowerCase();
+    if (baseFont.includes('times')) return 'Times New Roman';
+    if (baseFont.includes('courier')) return 'Courier New';
+    if (baseFont.includes('arial')) return 'Arial';
+    if (baseFont.includes('cambria')) return 'Cambria';
+    if (baseFont.includes('calibri')) return 'Calibri';
+  }
 
   // For obfuscated names (g_d0_f*), use context
   if (/^g_d\d+_f\d+$/.test(pdfFontName)) {
-    // If we have a detected serif/sans classification, use it
+    // Use font metadata if available
+    if (context.fontMap && context.fontMap[pdfFontName]) {
+      const fontInfo = context.fontMap[pdfFontName];
+      const baseFont = (fontInfo.baseFont || '').toLowerCase();
+      if (baseFont.includes('times')) return 'Times New Roman';
+      if (baseFont.includes('courier')) return 'Courier New';
+      if (baseFont.includes('arial')) return 'Arial';
+      if (baseFont.includes('cambria')) return 'Cambria';
+    }
+    // Fallback: if serif detected, use Times New Roman
     if (context.serifDetected) return 'Times New Roman';
     if (context.sansDetected) return 'Arial';
-    // Default to Times New Roman for academic documents
     return context.defaultFont || 'Times New Roman';
   }
+
+  // Check for common patterns in font names
+  if (lower.includes('bold') && lower.includes('italic')) return context.defaultFont || 'Times New Roman';
+  if (lower.includes('bold')) return context.defaultFont || 'Times New Roman';
+  if (lower.includes('italic') || lower.includes('oblique')) return context.defaultFont || 'Times New Roman';
 
   // Default based on serif/sans classification
   if (lower.includes('serif') && !lower.includes('sans')) return 'Times New Roman';

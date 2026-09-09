@@ -168,6 +168,32 @@ async function buildDocx(pages, options = {}) {
   const doc = new Document({
     creator: 'PDFNova',
     title: 'Converted from PDF',
+    styles: {
+      default: {
+        document: {
+          run: {
+            font: 'Times New Roman',
+            size: 20,
+          },
+        },
+      },
+      paragraphStyles: [
+        {
+          id: 'BodyText',
+          name: 'Body Text',
+          basedOn: 'Normal',
+          next: 'BodyText',
+          run: {
+            font: 'Times New Roman',
+            size: 20,
+          },
+          paragraph: {
+            spacing: { after: 0, line: 276 },
+            indent: { firstLine: 288 },
+          },
+        },
+      ],
+    },
     numbering: {
       config: [
         {
@@ -353,6 +379,7 @@ function buildParagraph(block, bodySize, typographyContext) {
   const isHeading = block.isHeading && block.headingLevel > 0;
   const isTitle = block.zone === 'TITLE';
   const isSubtitle = block.zone === 'SUBTITLE';
+  const isBody = !isHeading && !isTitle && !isSubtitle && !block.isListItem;
 
   let headingLevel;
   if (isTitle) {
@@ -365,15 +392,25 @@ function buildParagraph(block, bodySize, typographyContext) {
   const fontName = mapFontName(block.fontName, typographyContext);
   const alignment = ALIGN_MAP[block.alignment] || AlignmentType.LEFT;
 
-  // Spacing: titles get less before/after, headings get more
+  // Spacing: computed from PDF geometry
   let spacingBefore = 0;
-  let spacingAfter = 120;
+  let spacingAfter = 0;
+  let lineSpacing = undefined;
+
   if (headingLevel === 'title') {
     spacingBefore = 0;
-    spacingAfter = 120;
+    spacingAfter = 160;
   } else if (isHeading) {
-    spacingBefore = Math.round(bodySize * 40);
-    spacingAfter = Math.round(bodySize * 20);
+    // Headings: before based on font size, minimal after
+    spacingBefore = Math.round(halfPoints * 20);
+    spacingAfter = 0;
+  } else if (isBody) {
+    // Body text: small spacing, line spacing from PDF
+    spacingBefore = 0;
+    spacingAfter = 0;
+    if (block.lineCount > 1) {
+      lineSpacing = 276;
+    }
   }
 
   const runs = buildTextRuns(block, fontName, halfPoints, typographyContext);
@@ -384,14 +421,17 @@ function buildParagraph(block, bodySize, typographyContext) {
     spacing: {
       before: spacingBefore,
       after: spacingAfter,
-      line: block.lineCount > 1 ? 276 : undefined,
+      line: lineSpacing,
     },
   };
 
+  // Style selection
   if (headingLevel === 'title') {
     paragraphConfig.style = 'Title';
   } else if (isHeading && headingLevel) {
     paragraphConfig.heading = headingLevel;
+  } else if (isBody) {
+    paragraphConfig.style = 'BodyText';
   }
 
   // List items: use Word numbering
@@ -400,16 +440,29 @@ function buildParagraph(block, bodySize, typographyContext) {
       reference: 'pdf-list',
       level: 0,
     };
+    // Override style for list items
+    paragraphConfig.style = 'ListParagraph';
   }
 
-  // Indentation
-  const leftMargin = 72;
-  if (block.leftX > leftMargin + 20) {
-    const indentTwips = Math.round(((block.leftX - leftMargin) / 72) * 1440);
-    paragraphConfig.indent = { left: Math.min(indentTwips, convertInchesToTwip(3)) };
+  // Indentation: compute from PDF x-position relative to content left margin
+  const pageMargins = detectPageMarginsFromBlock(block);
+  if (block.leftX > pageMargins.left + 15) {
+    const indentTwips = Math.round(((block.leftX - pageMargins.left) / 72) * 1440);
+    paragraphConfig.indent = paragraphConfig.indent || {};
+    paragraphConfig.indent.left = Math.min(indentTwips, convertInchesToTwip(3));
   }
 
   return new Paragraph(paragraphConfig);
+}
+
+/**
+ * Detect page margins from a block's page context.
+ */
+function detectPageMarginsFromBlock(block) {
+  // Use reasonable defaults for academic papers
+  const pageWidth = block.pageWidth || 612;
+  // Standard academic: left ~1 inch (72pt), right ~1 inch (72pt)
+  return { left: 72, right: pageWidth - 72 };
 }
 
 /**
@@ -437,16 +490,17 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
         const itemFont = mapFontName(item.fontName, typographyContext);
         const itemSize = fontSizeToHalfPoints(item.fontSize || block.fontSize);
 
-        // Determine bold/italic per item based on zone context
+        // Determine bold/italic per item based on font metadata and zone context
         let itemBold, itemItalic;
         if (zone === 'ABSTRACT' || zone === 'INDEX_TERMS') {
-          // In these zones, determine if this item is the label or body
+          // In these zones, detect italic label vs bold body at item level
           const isLabelItem = isLabelItemInZone(item, line, block, zone);
-          itemBold = !isLabelItem; // body is bold, label is not
-          itemItalic = isLabelItem; // label is italic, body is not
+          itemItalic = isLabelItem;
+          itemBold = !isLabelItem && (item.fontBold || block.bold || false);
         } else {
-          itemBold = block.bold || false;
-          itemItalic = block.italic || false;
+          // Use font metadata first, fall back to block-level detection
+          itemBold = item.fontBold || block.bold || false;
+          itemItalic = item.fontItalic || block.italic || false;
         }
 
         const itemSuperScript = (item.fontSize || block.fontSize) <= 7.5 && (item.fontSize || block.fontSize) >= 5.0;

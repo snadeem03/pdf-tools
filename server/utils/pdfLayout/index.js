@@ -41,7 +41,7 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
   };
 
   // Stage 1: Extract text items
-  const { pages, allItems } = await extractTextItems(pdfBytes);
+  const { pages, allItems, fontMap } = await extractTextItems(pdfBytes);
   stats.totalPages = pages.length;
   stats.totalItems = allItems.length;
 
@@ -52,6 +52,7 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
 
   // Stage 2: Analyze document typography (before processing)
   const typographyContext = analyzeDocumentTypography(pages);
+  typographyContext.fontMap = fontMap;
 
   if (debug) {
     // eslint-disable-next-line no-console
@@ -151,30 +152,17 @@ function processPage(page, options = {}) {
 
 /**
  * Detect bold from zone context (called after classifyZones).
- * iLovePDF uses bold for: abstract (including label), index terms (including label),
- * section headings, table cells.
+ * Bold should only be applied based on actual font properties and
+ * visual evidence, not blanket zone assignment.
  */
 function detectBlockBoldFromZone(block) {
+  // Check if the font name itself indicates bold
   if (block.bold) return true;
   if (!block.lines || block.lines.length === 0) return false;
 
-  const zone = block.zone || block.lines[0].zone || 'BODY';
-
-  // Abstract text is all bold (label + body)
-  if (zone === 'ABSTRACT') {
-    return true;
-  }
-
-  // Index Terms text is all bold (label + body)
-  if (zone === 'INDEX_TERMS') {
-    return true;
-  }
-
-  // Section headings (Roman numerals or A./B. pattern) are bold
-  if (zone === 'BODY' && block.isHeading) {
-    return true;
-  }
-
+  // Do NOT apply bold to headings - they use heading styles
+  // Do NOT apply bold to abstract/index terms - handled at item level
+  // Only apply bold if the actual font name indicates it
   return false;
 }
 
