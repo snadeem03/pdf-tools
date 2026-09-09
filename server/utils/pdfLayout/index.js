@@ -3,14 +3,19 @@
  *
  * Stages:
  *   1. Extract text items with coordinates via pdfjs-dist
- *   2. Group items into visual lines
- *   3. Group lines into paragraphs/blocks
- *   4. Detect tables from block geometry
- *   5. Build DOCX preserving typography, alignment, spacing, tables
+ *   2. Text-item normalization
+ *   3. Word-spacing reconstruction (groupLines)
+ *   4. Document-zone classification
+ *   5. Line grouping
+ *   6. Paragraph/block grouping
+ *   7. Typography analysis
+ *   8. Table detection
+ *   9. DOCX reconstruction
  */
 
 const { extractTextItems } = require('./extractTextItems');
 const { groupLines } = require('./groupLines');
+const { classifyZones } = require('./classifyZones');
 const { groupBlocks } = require('./groupBlocks');
 const { detectTables } = require('./detectTables');
 const { buildDocx } = require('./buildDocx');
@@ -46,6 +51,30 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
 
   // Process each page
   const processedPages = [];
+
+  for (const page of pages) {
+    const pageResult = processPage(page, { debug });
+    processedPages.push(pageResult);
+
+    stats.totalLines += pageResult.lines.length;
+    stats.totalBlocks += pageResult.blocks.length;
+    stats.tablesDetected += pageResult.tables.length;
+  }
+
+  // Stage 5: Classify document zones (after line grouping, on lines)
+  classifyZones(processedPages);
+
+  if (debug) {
+    // eslint-disable-next-line no-console
+    const zoneCounts = {};
+    for (const page of processedPages) {
+      for (const line of page.lines) {
+        const zone = line.zone || 'UNCLASSIFIED';
+        zoneCounts[zone] = (zoneCounts[zone] || 0) + 1;
+      }
+    }
+    console.log(`[pdfLayout] Zone classification:`, JSON.stringify(zoneCounts, null, 2));
+  }
 
   for (const page of pages) {
     const pageResult = processPage(page, { debug });
@@ -101,6 +130,7 @@ function processPage(page, options = {}) {
     pageIndex: page.pageIndex,
     width: page.width,
     height: page.height,
+    items: page.items,
     lines,
     blocks: remaining,
     tables,
