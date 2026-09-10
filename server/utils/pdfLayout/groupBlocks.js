@@ -48,6 +48,19 @@ function groupBlocks(lines) {
 }
 
 /**
+ * Compute median of a numeric array.
+ */
+function median(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  }
+  return sorted[mid];
+}
+
+/**
  * Compute the body font size (most frequent font size by character count).
  */
 function computeBodyFontSize(lines) {
@@ -227,13 +240,27 @@ function finalizeBlock(blockLines, bodyFontSize, pageMargins) {
   const leftX = Math.min(...blockLines.map((l) => l.x));
   const rightX = Math.max(...blockLines.map((l) => l.rightX));
 
-  let avgLineSpacing = 0;
+  // First-line vs continuation-line indent analysis
+  const firstLineX = blockLines[0].x;
+  let continuationLineX = firstLineX;
   if (blockLines.length > 1) {
-    let totalSpacing = 0;
-    for (let i = 1; i < blockLines.length; i++) {
-      totalSpacing += blockLines[i - 1].bottomY - blockLines[i].topY;
+    // Use the most common x-position among non-first lines as continuation indent
+    const nonFirstXs = blockLines.slice(1).map((l) => l.x);
+    continuationLineX = median(nonFirstXs);
+  }
+
+  // Per-line heights for line spacing computation
+  const lineHeights = blockLines.map((l) => l.height || l.fontSize || 10);
+
+  // Compute line spacing from baseline Y positions (pdfjs: higher y = higher on page)
+  let computedLineSpacing = 0;
+  if (blockLines.length > 1) {
+    const baselines = blockLines.map((l) => l.y);
+    const gaps = [];
+    for (let i = 1; i < baselines.length; i++) {
+      gaps.push(Math.abs(baselines[i - 1] - baselines[i]));
     }
-    avgLineSpacing = totalSpacing / (blockLines.length - 1);
+    computedLineSpacing = median(gaps);
   }
 
   const bold = detectBlockBold(blockLines, bodyFontSize);
@@ -253,13 +280,16 @@ function finalizeBlock(blockLines, bodyFontSize, pageMargins) {
     leftX,
     rightX,
     width: rightX - leftX,
+    firstLineX,
+    continuationLineX,
+    lineHeights,
+    computedLineSpacing,
     pageWidth: blockLines[0].pageWidth,
     pageHeight: blockLines[0].pageHeight,
     pageIndex: blockLines[0].pageIndex,
     topY: blockLines[0].topY,
     bottomY: blockLines[blockLines.length - 1].bottomY,
     lineCount: blockLines.length,
-    avgLineSpacing,
     bold,
     italic,
   };

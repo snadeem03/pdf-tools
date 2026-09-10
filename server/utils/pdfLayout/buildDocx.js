@@ -95,6 +95,9 @@ async function buildDocx(pages, options = {}) {
     // Merge tables, blocks, and images, preserving reading order
     const elements = mergeElements(page, pageImages);
 
+    // Precompute spacing before/after for each element from vertical gaps
+    computeElementSpacing(elements);
+
     for (const element of elements) {
       if (element.type === 'table') {
         const table = buildTable(element, bodySize, typographyContext);
@@ -195,7 +198,7 @@ async function buildDocx(pages, options = {}) {
           },
           paragraph: {
             spacing: { after: 0, line: 276 },
-            indent: { firstLine: 288, right: 20 },
+            indent: { right: 20 },
           },
         },
         {
@@ -418,7 +421,77 @@ function mergeElements(page, pageImages) {
 }
 
 /**
+ * Precompute spacingBefore/spacingAfter for each element from vertical gaps.
+ * Skips image elements when computing gaps for text blocks.
+ * Modifies elements in-place.
+ */
+function computeElementSpacing(elements) {
+  // First pass: compute text-only gaps for text elements
+  const textElements = elements.filter(el => el.type !== 'image');
+  
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    const elTop = el.topY || el.y || 0;
+    const elBottom = el.bottomY || elTop;
+    const isImage = el.type === 'image';
+
+    // Estimate line height for normalization
+    const lineHeight = el.lineHeights
+      ? Math.max(...el.lineHeights)
+      : el.fontSize ? el.fontSize * 1.2 : 12;
+
+    if (isImage) {
+      // Images: minimal spacing, let content flow naturally
+      el._gapBefore = 0;
+      el._gapAfter = 0;
+      el._gapBeforeNormalized = 0;
+      el._gapAfterNormalized = 0;
+      continue;
+    }
+
+    // For text elements, find previous and next TEXT elements
+    let prevTextBottom = null;
+    let nextTextTop = null;
+    
+    for (let j = i - 1; j >= 0; j--) {
+      if (elements[j].type !== 'image') {
+        prevTextBottom = elements[j].bottomY || (elements[j].topY || 0);
+        break;
+      }
+    }
+    
+    for (let j = i + 1; j < elements.length; j++) {
+      if (elements[j].type !== 'image') {
+        nextTextTop = elements[j].topY || 0;
+        break;
+      }
+    }
+
+    // Gap to previous text element
+    if (prevTextBottom !== null) {
+      const gap = elTop - prevTextBottom;
+      el._gapBefore = gap;
+      el._gapBeforeNormalized = gap / Math.max(lineHeight, 1);
+    } else {
+      el._gapBefore = 0;
+      el._gapBeforeNormalized = 0;
+    }
+
+    // Gap to next text element
+    if (nextTextTop !== null) {
+      const gap = nextTextTop - elBottom;
+      el._gapAfter = gap;
+      el._gapAfterNormalized = gap / Math.max(lineHeight, 1);
+    } else {
+      el._gapAfter = 0;
+      el._gapAfterNormalized = 0;
+    }
+  }
+}
+
+/**
  * Build a docx Paragraph from a text block.
+ * Computes indentation and spacing from PDF geometry.
  */
 function buildParagraph(block, bodySize, typographyContext) {
   if (!block || !block.text || !block.text.trim()) return null;
@@ -439,7 +512,10 @@ function buildParagraph(block, bodySize, typographyContext) {
   const fontName = mapFontName(block.fontName, typographyContext);
   const alignment = ALIGN_MAP[block.alignment] || AlignmentType.LEFT;
 
-  // Spacing: computed from PDF geometry
+  // ── SPACING: computed from PDF geometry ──────────────────────────────
+  const pageHeight = block.pageHeight || 792;
+  const lineH = block.lineHeights ? Math.max(...block.lineHeights) : block.fontSize * 1.2;
+
   let spacingBefore = 0;
   let spacingAfter = 0;
   let lineSpacing = undefined;
@@ -448,14 +524,40 @@ function buildParagraph(block, bodySize, typographyContext) {
     spacingBefore = 0;
     spacingAfter = 160;
   } else if (isHeading) {
-    spacingBefore = Math.round(halfPoints * 12);
+    // Headings: use gap before if it's significant (> half a line)
+    const gapBefore = block._gapBefore || 0;
+    spacingBefore = gapBefore > lineH * 0.3 ? ptToTwips(gapBefore) : Math.round(halfPoints * 12);
     spacingAfter = 0;
-  } else if (isBody) {
-    spacingBefore = 0;
-    spacingAfter = 0;
-    if (block.lineCount > 1) {
-      lineSpacing = 276;
+  } else {
+    // Body / list / other: use computed gaps
+    const gapBefore = block._gapBefore || 0;
+    const gapAfter = block._gapAfter || 0;
+
+    // Convert gaps to twips, clamping to reasonable values
+    // A gap of ~1 line height is normal paragraph separation
+    if (gapBefore > lineH * 0.4) {
+      spacingBefore = ptToTwips(gapBefore);
     }
+    if (gapAfter > lineH * 0.4) {
+      spacingAfter = ptToTwips(gapAfter);
+    }
+
+    // Cap to prevent huge blank spaces (max ~3 lines of spacing)
+    const maxSpacing = ptToTwips(lineH * 3);
+    spacingBefore = Math.min(spacingBefore, maxSpacing);
+    spacingAfter = Math.min(spacingAfter, maxSpacing);
+  }
+
+  // ── LINE SPACING: computed from baseline Y positions ─────────────────
+  if (block.lineCount > 1 && block.computedLineSpacing > 0) {
+    // computedLineSpacing is in PDF points (baseline-to-baseline distance)
+    // Word line spacing is in 240ths of a line (single = 240, 1.5 = 360, double = 480)
+    // Or can be specified in twips (absolute)
+    const baselineGap = block.computedLineSpacing;
+    const singleSpacing = lineH * 1.2; // normal single spacing
+
+    // Use absolute line spacing in twips for precision
+    lineSpacing = ptToTwips(baselineGap);
   }
 
   const runs = buildTextRuns(block, fontName, halfPoints, typographyContext);
@@ -488,23 +590,47 @@ function buildParagraph(block, bodySize, typographyContext) {
     paragraphConfig.style = 'ListParagraph';
   }
 
-  // Indentation: compute from PDF x-position
+  // ── INDENTATION: computed from PDF geometry ──────────────────────────
   const pageWidth = block.pageWidth || 612;
   const contentLeft = 72; // ~1 inch
   const contentRight = pageWidth - 72;
 
-  if (block.leftX > contentLeft + 15) {
-    const indentTwips = Math.round(((block.leftX - contentLeft) / 72) * 1440);
+  // Left indent: from leftmost content to page content boundary
+  if (block.leftX > contentLeft + 5) {
+    const leftIndentPt = block.leftX - contentLeft;
     paragraphConfig.indent = paragraphConfig.indent || {};
-    paragraphConfig.indent.left = Math.min(indentTwips, convertInchesToTwip(3));
+    paragraphConfig.indent.left = ptToTwips(leftIndentPt);
   }
 
-  // For body text, add first-line indent if not a continuation line
-  if (isBody && block.lineCount > 1 && alignment === 'justified') {
-    // First-line indent is already set via BodyText style
+  // First-line indent: difference between first line and continuation lines
+  if (block.lineCount > 1 && block.firstLineX !== undefined && block.continuationLineX !== undefined) {
+    const firstLineIndentPt = block.firstLineX - block.continuationLineX;
+    if (Math.abs(firstLineIndentPt) > 3) {
+      paragraphConfig.indent = paragraphConfig.indent || {};
+      // Negative firstLineX diff means first line starts LEFT of continuation (hanging indent)
+      // Positive means first line starts RIGHT of continuation (standard first-line indent)
+      paragraphConfig.indent.firstLine = ptToTwips(Math.max(firstLineIndentPt, -100));
+    }
+  }
+
+  // Right indent: from rightmost content to page content boundary
+  const actualRight = block.rightX || (block.leftX + (block.width || 0));
+  if (actualRight < contentRight - 10 && actualRight > contentLeft) {
+    const rightIndentPt = contentRight - actualRight;
+    if (rightIndentPt > 3) {
+      paragraphConfig.indent = paragraphConfig.indent || {};
+      paragraphConfig.indent.right = ptToTwips(rightIndentPt);
+    }
   }
 
   return new Paragraph(paragraphConfig);
+}
+
+/**
+ * Convert PDF points to Word twips (1 point = 20 twips).
+ */
+function ptToTwips(pt) {
+  return Math.round(pt * 20);
 }
 
 /**
