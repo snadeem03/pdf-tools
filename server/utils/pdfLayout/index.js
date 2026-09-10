@@ -14,6 +14,7 @@
  */
 
 const { extractTextItems } = require('./extractTextItems');
+const { extractImages } = require('./extractImages');
 const { groupLines } = require('./groupLines');
 const { classifyZones } = require('./classifyZones');
 const { groupBlocks } = require('./groupBlocks');
@@ -44,6 +45,10 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
   const { pages, allItems, fontMap } = await extractTextItems(pdfBytes);
   stats.totalPages = pages.length;
   stats.totalItems = allItems.length;
+
+  // Stage 1b: Extract embedded images
+  const { images: extractedImages } = await extractImages(pdfBytes, { debug });
+  stats.totalImages = extractedImages.length;
 
   if (debug) {
     // eslint-disable-next-line no-console
@@ -99,7 +104,7 @@ async function convertPdfToDocx(pdfBytes, options = {}) {
   }
 
   // Stage 7: Build DOCX
-  const buffer = await buildDocx(processedPages, { typographyContext });
+  const buffer = await buildDocx(processedPages, { typographyContext, images: extractedImages });
 
   if (debug) {
     // eslint-disable-next-line no-console

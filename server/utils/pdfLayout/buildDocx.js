@@ -18,6 +18,7 @@ const {
   Packer,
   Paragraph,
   TextRun,
+  ImageRun,
   Table,
   TableRow,
   TableCell,
@@ -62,7 +63,7 @@ const ALIGN_MAP = {
  * @returns {Promise<Buffer>} – DOCX file buffer
  */
 async function buildDocx(pages, options = {}) {
-  const { typographyContext = {} } = options;
+  const { typographyContext = {}, images = [] } = options;
 
   // Classify font sizes across all blocks
   const allBlocks = pages.flatMap((p) => p.blocks || []);
@@ -88,8 +89,11 @@ async function buildDocx(pages, options = {}) {
 
     const children = [];
 
-    // Merge tables and blocks, preserving order
-    const elements = mergeElements(page);
+    // Get images for this page
+    const pageImages = images.filter(img => img.pageIndex === pageIdx);
+
+    // Merge tables, blocks, and images, preserving reading order
+    const elements = mergeElements(page, pageImages);
 
     for (const element of elements) {
       if (element.type === 'table') {
@@ -97,6 +101,9 @@ async function buildDocx(pages, options = {}) {
         if (table) {
           children.push(table);
         }
+      } else if (element.type === 'image') {
+        const imgParagraph = buildImageParagraph(element, typographyContext);
+        if (imgParagraph) children.push(imgParagraph);
       } else {
         const paragraph = buildParagraph(element, bodySize, typographyContext);
         if (paragraph) children.push(paragraph);
@@ -377,23 +384,35 @@ function buildHeaderFooter(items, pageWidth, typographyContext, type) {
 }
 
 /**
- * Merge tables and blocks into a single ordered list.
+ * Merge tables, blocks, and images into a single ordered list.
+ * Orders by vertical position (top-to-bottom in pdfjs coords = bottom-to-top in value).
  */
-function mergeElements(page) {
+function mergeElements(page, pageImages) {
   const elements = [];
-  const processedBlocks = new Set();
 
-  // Add tables first
+  // Add tables
   for (const table of page.tables || []) {
     elements.push(table);
   }
 
   // Add remaining blocks
   for (const block of page.blocks || []) {
-    if (!processedBlocks.has(block)) {
-      elements.push(block);
-    }
+    elements.push(block);
   }
+
+  // Add images for this page
+  for (const img of (pageImages || [])) {
+    elements.push({ type: 'image', ...img });
+  }
+
+  // Sort by vertical position for reading order
+  // pdfjs coords: y=0 is top, y=pageHeight is bottom
+  // Ascending y = top-to-bottom reading order
+  elements.sort((a, b) => {
+    const aY = a.topY || a.y || 0;
+    const bY = b.topY || b.y || 0;
+    return aY - bY;
+  });
 
   return elements;
 }
@@ -486,6 +505,67 @@ function buildParagraph(block, bodySize, typographyContext) {
   }
 
   return new Paragraph(paragraphConfig);
+}
+
+/**
+ * Build a DOCX paragraph containing an embedded image.
+ * Preserves aspect ratio and approximate display size.
+ */
+function buildImageParagraph(imageData, typographyContext) {
+  if (!imageData || !imageData.imageBuffer) return null;
+
+  // Determine image type for docx
+  let imageType;
+  switch (imageData.format) {
+    case 'jpeg': imageType = 'jpg'; break;
+    case 'png': imageType = 'png'; break;
+    default: imageType = 'png'; break;
+  }
+
+  // Compute display size in pixels at 96 DPI
+  // 1 PDF point = 1/72 inch = 96/72 = 1.333 pixels at 96 DPI
+  // Use draw dimensions (how the image is displayed, not native pixel size)
+  const drawWidthPt = imageData.drawWidth || imageData.width;
+  const drawHeightPt = imageData.drawHeight || imageData.height;
+
+  // Convert PDF points to pixels at 96 DPI
+  let finalWidth = Math.round(drawWidthPt * 96 / 72);
+  let finalHeight = Math.round(drawHeightPt * 96 / 72);
+
+  // Cap to reasonable page bounds (max ~500pt = ~667px wide)
+  const maxWidthPx = 667;
+  if (finalWidth > maxWidthPx) {
+    const scale = maxWidthPx / finalWidth;
+    finalWidth = maxWidthPx;
+    finalHeight = Math.round(finalHeight * scale);
+  }
+
+  // Ensure minimum size
+  if (finalWidth < 10) finalWidth = 10;
+  if (finalHeight < 10) finalHeight = 10;
+
+  try {
+    const imageRun = new ImageRun({
+      data: imageData.imageBuffer,
+      transformation: {
+        width: finalWidth,
+        height: finalHeight,
+      },
+      type: imageType,
+    });
+
+    // Center the image if it's narrow (typical for figures)
+    const isCentered = finalWidth < 400; // less than ~300pt = likely a figure
+
+    return new Paragraph({
+      children: [imageRun],
+      alignment: isCentered ? AlignmentType.CENTER : AlignmentType.LEFT,
+      spacing: { before: 60, after: 60 },
+    });
+  } catch (e) {
+    // If image insertion fails, return null (don't break the pipeline)
+    return null;
+  }
 }
 
 /**
