@@ -1,4 +1,4 @@
-/**
+﻿/**
  * DOCX reconstruction from analyzed PDF layout data.
  *
  * Builds a Word document preserving:
@@ -11,6 +11,7 @@
  *   - page breaks
  *   - page dimensions and margins
  *   - headers and footers
+ *   - multi-column layout
  */
 
 const {
@@ -34,11 +35,12 @@ const {
   Numbering,
   LevelFormat,
   convertMillimetersToTwip,
+  SectionType,
+  Columns,
 } = require('docx');
 
 const { mapFontName, fontSizeToHalfPoints, classifyFontSizes } = require('./analyzeTypography');
 
-// Word heading levels mapping
 const HEADING_LEVELS = {
   1: HeadingLevel.HEADING_1,
   2: HeadingLevel.HEADING_2,
@@ -46,7 +48,6 @@ const HEADING_LEVELS = {
   4: HeadingLevel.HEADING_4,
 };
 
-// PDF to Word alignment mapping
 const ALIGN_MAP = {
   left: AlignmentType.LEFT,
   center: AlignmentType.CENTER,
@@ -54,112 +55,17 @@ const ALIGN_MAP = {
   justified: AlignmentType.JUSTIFIED,
 };
 
-/**
- * Build a complete DOCX document from analyzed page data.
- *
- * @param {object[]} pages – array of { blocks: object[], tables: object[], width, height, pageIndex }
- * @param {object} [options]
- * @param {object} [options.typographyContext] – typography analysis results
- * @returns {Promise<Buffer>} – DOCX file buffer
- */
 async function buildDocx(pages, options = {}) {
   const { typographyContext = {}, images = [] } = options;
 
-  // Classify font sizes across all blocks
   const allBlocks = pages.flatMap((p) => p.blocks || []);
   const { bodySize } = classifyFontSizes(allBlocks);
 
-  // Extract headers and footers from all pages
   const headerFooter = extractHeaderFooter(pages);
-
-  // Compute actual margins from page content
   const pageMargins = computePageMargins(pages);
 
-  const sections = [];
-
-  for (let pageIdx = 0; pageIdx < pages.length; pageIdx++) {
-    const page = pages[pageIdx];
-    const pageWidth = page.width || 612;
-    const pageHeight = page.height || 792;
-
-    const sectionWidth = Math.round((pageWidth / 72) * 1440);
-    const sectionHeight = Math.round((pageHeight / 72) * 1440);
-
-    const margins = pageMargins[pageIdx] || { top: 720, bottom: 720, left: 708, right: 708 };
-
-    const children = [];
-
-    // Get images for this page
-    const pageImages = images.filter(img => img.pageIndex === pageIdx);
-
-    // Merge tables, blocks, and images, preserving reading order
-    const elements = mergeElements(page, pageImages);
-
-    // Precompute spacing before/after for each element from vertical gaps
-    computeElementSpacing(elements);
-
-    for (const element of elements) {
-      if (element.type === 'table') {
-        const table = buildTable(element, bodySize, typographyContext);
-        if (table) {
-          children.push(table);
-        }
-      } else if (element.type === 'image') {
-        const imgParagraph = buildImageParagraph(element, typographyContext);
-        if (imgParagraph) children.push(imgParagraph);
-      } else {
-        const paragraph = buildParagraph(element, bodySize, typographyContext);
-        if (paragraph) children.push(paragraph);
-      }
-    }
-
-    // Add page break between pages (except after last page)
-    if (pageIdx < pages.length - 1 && children.length > 0) {
-      children.push(
-        new Paragraph({
-          children: [new PageBreak()],
-          spacing: { before: 0, after: 0 },
-        })
-      );
-    }
-
-    // Build section config with headers/footers
-    const sectionConfig = {
-      properties: {
-        page: {
-          size: {
-            width: sectionWidth,
-            height: sectionHeight,
-          },
-          margin: {
-            top: margins.top,
-            bottom: margins.bottom,
-            left: margins.left,
-            right: margins.right,
-          },
-        },
-      },
-      children,
-    };
-
-    // Add headers and footers for this page
-    const pageHeaders = headerFooter.headers.filter((h) => h.pageIndex === pageIdx);
-    const pageFooters = headerFooter.footers.filter((f) => f.pageIndex === pageIdx);
-
-    if (pageHeaders.length > 0 || pageFooters.length > 0) {
-      const headerContent = buildHeaderFooter(pageHeaders, pageWidth, typographyContext, 'header');
-      const footerContent = buildHeaderFooter(pageFooters, pageWidth, typographyContext, 'footer');
-
-      if (headerContent) {
-        sectionConfig.headers = { default: headerContent };
-      }
-      if (footerContent) {
-        sectionConfig.footers = { default: footerContent };
-      }
-    }
-
-    sections.push(sectionConfig);
-  }
+  const segments = buildLayoutSegments(pages, images);
+  const sections = buildSectionsFromSegments(segments, pages, headerFooter, pageMargins, bodySize, typographyContext);
 
   if (sections.length === 0) {
     sections.push({
@@ -259,16 +165,150 @@ async function buildDocx(pages, options = {}) {
   return Packer.toBuffer(doc);
 }
 
-/**
- * Compute page margins.
- * Uses content bounding box for left/right margins (reliable).
- * For top/bottom, uses computed values with fallback to standard A4
- * (matching iLovePDF reference for this paper format).
- */
+function buildLayoutSegments(pages, images) {
+  const segments = [];
+
+  for (const page of pages) {
+    const layout = page.layout;
+    if (!layout) {
+      const allElements = [
+        ...(page.blocks || []).map(b => ({ ...b, _elementType: 'block', _sourcePageIndex: page.pageIndex })),
+        ...(page.tables || []).map(t => ({ ...t, _elementType: 'table', _sourcePageIndex: page.pageIndex })),
+      ];
+      segments.push({
+        columnCount: 1,
+        elements: allElements,
+        pageIndex: page.pageIndex,
+        isFirstPage: page.pageIndex === 0,
+        isLastPage: page.pageIndex === pages.length - 1,
+      });
+      continue;
+    }
+
+    for (const zone of layout.zones) {
+      const elements = zone.elements.map(el => ({ ...el, _sourcePageIndex: page.pageIndex }));
+      const columnCount = zone.type === 'fullWidth' ? 1 : layout.columnCount;
+
+      segments.push({
+        columnCount,
+        elements,
+        pageIndex: page.pageIndex,
+        isFirstPage: page.pageIndex === 0 && segments.length === 0,
+        isLastPage: page.pageIndex === pages.length - 1,
+        zoneType: zone.type,
+      });
+    }
+  }
+
+  return segments;
+}
+
+function buildSectionsFromSegments(segments, pages, headerFooter, pageMargins, bodySize, typographyContext) {
+  if (segments.length === 0) return [];
+
+  const sections = [];
+  let prevColumnCount = 0;
+
+  for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+    const segment = segments[segIdx];
+    const pageIdx = segment.pageIndex;
+    const page = pages[pageIdx];
+    const pageWidth = page.width || 612;
+    const pageHeight = page.height || 792;
+
+    const sectionWidth = Math.round((pageWidth / 72) * 1440);
+    const sectionHeight = Math.round((pageHeight / 72) * 1440);
+    const margins = pageMargins[pageIdx] || { top: 720, bottom: 720, left: 708, right: 708 };
+
+    let sectionType = undefined;
+    if (segIdx > 0) {
+      const prevSeg = segments[segIdx - 1];
+      if (prevSeg.pageIndex !== segment.pageIndex) {
+        sectionType = undefined;
+      } else if (prevSeg.columnCount !== segment.columnCount) {
+        sectionType = SectionType.CONTINUOUS;
+      } else {
+        if (sections.length > 0) {
+          const prevSection = sections[sections.length - 1];
+          for (const el of segment.elements) {
+            const child = buildElement(el, bodySize, typographyContext);
+            if (child) prevSection.children.push(child);
+          }
+          continue;
+        }
+      }
+    }
+
+    const children = [];
+    for (const el of segment.elements) {
+      const child = buildElement(el, bodySize, typographyContext);
+      if (child) children.push(child);
+    }
+
+    if (children.length === 0) continue;
+
+    const sectionConfig = {
+      properties: {
+        page: {
+          size: {
+            width: sectionWidth,
+            height: sectionHeight,
+          },
+          margin: {
+            top: margins.top,
+            bottom: margins.bottom,
+            left: margins.left,
+            right: margins.right,
+          },
+        },
+      },
+      children,
+    };
+
+    if (sectionType) {
+      sectionConfig.properties.type = sectionType;
+    }
+
+    if (segment.columnCount > 1) {
+      const layout = page.layout;
+      const gap = (layout && layout.columnGap > 0) ? layout.columnGap : 36;
+      const gapTwips = Math.max(Math.round(gap * 20), 100);
+
+      sectionConfig.properties.column = {
+        count: segment.columnCount,
+        space: gapTwips,
+      };
+    }
+
+    const pageHeaders = headerFooter.headers.filter((h) => h.pageIndex === pageIdx);
+    const pageFooters = headerFooter.footers.filter((f) => f.pageIndex === pageIdx);
+
+    if (pageHeaders.length > 0 || pageFooters.length > 0) {
+      const headerContent = buildHeaderFooter(pageHeaders, pageWidth, typographyContext, 'header');
+      const footerContent = buildHeaderFooter(pageFooters, pageWidth, typographyContext, 'footer');
+      if (headerContent) sectionConfig.headers = { default: headerContent };
+      if (footerContent) sectionConfig.footers = { default: footerContent };
+    }
+
+    sections.push(sectionConfig);
+    prevColumnCount = segment.columnCount;
+  }
+
+  return sections;
+}
+
+function buildElement(element, bodySize, typographyContext) {
+  if (element._elementType === 'table') {
+    return buildTable(element, bodySize, typographyContext);
+  } else if (element._elementType === 'image') {
+    return buildImageParagraph(element, typographyContext);
+  } else {
+    return buildParagraph(element, bodySize, typographyContext);
+  }
+}
+
 function computePageMargins(pages) {
   const result = [];
-
-  // Collect body content positions (excluding headers/footers)
   const allBlocks = [];
   for (const page of pages) {
     for (const block of page.blocks || []) {
@@ -286,84 +326,45 @@ function computePageMargins(pages) {
   }
 
   const pageWidth = pages[0] ? pages[0].width : 595.32;
-
-  // Left/right from content bounding box (reliable)
   const minLeftX = Math.min(...allBlocks.filter((b) => b.leftX > 0).map((b) => b.leftX));
   const maxRightX = Math.max(...allBlocks.filter((b) => b.rightX > 0).map((b) => b.rightX));
   const left = Math.max(0, Math.round((minLeftX / 72) * 1440));
   const right = Math.max(0, Math.round(((pageWidth - maxRightX) / 72) * 1440));
-
-  // For top/bottom: use standard A4 academic paper margins
-  // (computed values are unreliable due to headers/titles near page edges)
   const margins = { top: 1000, bottom: 480, left, right };
 
   for (const page of pages) {
     result.push(margins);
   }
-
   return result;
 }
 
-/**
- * Extract headers and footers from page data.
- */
 function extractHeaderFooter(pages) {
   const headers = [];
   const footers = [];
-
   for (const page of pages) {
     const allItems = page.items || [];
     const pageIdx = page.pageIndex;
-
     for (const item of allItems) {
       const zone = item.zone || '';
-
-      // Header items are at the top of the page
       if (zone === 'HEADER') {
-        headers.push({
-          text: (item.str || '').trim(),
-          y: item.y,
-          pageIndex: pageIdx,
-        });
+        headers.push({ text: (item.str || '').trim(), y: item.y, pageIndex: pageIdx });
       }
-
-      // Footer items are at the bottom of the page
       if (zone === 'FOOTER') {
-        footers.push({
-          text: (item.str || '').trim(),
-          y: item.y,
-          pageIndex: pageIdx,
-        });
+        footers.push({ text: (item.str || '').trim(), y: item.y, pageIndex: pageIdx });
       }
     }
   }
-
   return { headers, footers };
 }
 
-/**
- * Build a header or footer.
- * @param {object[]} items - header/footer items
- * @param {number} pageWidth - page width in points
- * @param {object} typographyContext - typography context
- * @param {string} type - 'header' or 'footer'
- * @returns {Header|Footer|null}
- */
 function buildHeaderFooter(items, pageWidth, typographyContext, type) {
   if (!items || items.length === 0) return null;
-
-  // Sort by Y position
   items.sort((a, b) => a.y - b.y);
-
-  // Combine text items into a single line
   const text = items.map((i) => i.text).join(' ');
-
   if (!text.trim()) return null;
 
-  // Determine alignment based on position
   const avgX = items.reduce((s, i) => s + (i.x || 0), 0) / items.length;
   const centerX = pageWidth / 2;
-
   let alignment = AlignmentType.CENTER;
   if (avgX < centerX * 0.5) alignment = AlignmentType.LEFT;
   else if (avgX > centerX * 1.5) alignment = AlignmentType.RIGHT;
@@ -386,113 +387,10 @@ function buildHeaderFooter(items, pageWidth, typographyContext, type) {
   return new Header({ children: [paragraph] });
 }
 
-/**
- * Merge tables, blocks, and images into a single ordered list.
- * Orders by vertical position (top-to-bottom in pdfjs coords = bottom-to-top in value).
- */
-function mergeElements(page, pageImages) {
-  const elements = [];
-
-  // Add tables
-  for (const table of page.tables || []) {
-    elements.push(table);
-  }
-
-  // Add remaining blocks
-  for (const block of page.blocks || []) {
-    elements.push(block);
-  }
-
-  // Add images for this page
-  for (const img of (pageImages || [])) {
-    elements.push({ type: 'image', ...img });
-  }
-
-  // Sort by vertical position for reading order
-  // pdfjs coords: y=0 is top, y=pageHeight is bottom
-  // Ascending y = top-to-bottom reading order
-  elements.sort((a, b) => {
-    const aY = a.topY || a.y || 0;
-    const bY = b.topY || b.y || 0;
-    return aY - bY;
-  });
-
-  return elements;
+function ptToTwips(pt) {
+  return Math.round(pt * 20);
 }
 
-/**
- * Precompute spacingBefore/spacingAfter for each element from vertical gaps.
- * Skips image elements when computing gaps for text blocks.
- * Modifies elements in-place.
- */
-function computeElementSpacing(elements) {
-  // First pass: compute text-only gaps for text elements
-  const textElements = elements.filter(el => el.type !== 'image');
-  
-  for (let i = 0; i < elements.length; i++) {
-    const el = elements[i];
-    const elTop = el.topY || el.y || 0;
-    const elBottom = el.bottomY || elTop;
-    const isImage = el.type === 'image';
-
-    // Estimate line height for normalization
-    const lineHeight = el.lineHeights
-      ? Math.max(...el.lineHeights)
-      : el.fontSize ? el.fontSize * 1.2 : 12;
-
-    if (isImage) {
-      // Images: minimal spacing, let content flow naturally
-      el._gapBefore = 0;
-      el._gapAfter = 0;
-      el._gapBeforeNormalized = 0;
-      el._gapAfterNormalized = 0;
-      continue;
-    }
-
-    // For text elements, find previous and next TEXT elements
-    let prevTextBottom = null;
-    let nextTextTop = null;
-    
-    for (let j = i - 1; j >= 0; j--) {
-      if (elements[j].type !== 'image') {
-        prevTextBottom = elements[j].bottomY || (elements[j].topY || 0);
-        break;
-      }
-    }
-    
-    for (let j = i + 1; j < elements.length; j++) {
-      if (elements[j].type !== 'image') {
-        nextTextTop = elements[j].topY || 0;
-        break;
-      }
-    }
-
-    // Gap to previous text element
-    if (prevTextBottom !== null) {
-      const gap = elTop - prevTextBottom;
-      el._gapBefore = gap;
-      el._gapBeforeNormalized = gap / Math.max(lineHeight, 1);
-    } else {
-      el._gapBefore = 0;
-      el._gapBeforeNormalized = 0;
-    }
-
-    // Gap to next text element
-    if (nextTextTop !== null) {
-      const gap = nextTextTop - elBottom;
-      el._gapAfter = gap;
-      el._gapAfterNormalized = gap / Math.max(lineHeight, 1);
-    } else {
-      el._gapAfter = 0;
-      el._gapAfterNormalized = 0;
-    }
-  }
-}
-
-/**
- * Build a docx Paragraph from a text block.
- * Computes indentation and spacing from PDF geometry.
- */
 function buildParagraph(block, bodySize, typographyContext) {
   if (!block || !block.text || !block.text.trim()) return null;
 
@@ -512,7 +410,6 @@ function buildParagraph(block, bodySize, typographyContext) {
   const fontName = mapFontName(block.fontName, typographyContext);
   const alignment = ALIGN_MAP[block.alignment] || AlignmentType.LEFT;
 
-  // ── SPACING: computed from PDF geometry ──────────────────────────────
   const pageHeight = block.pageHeight || 792;
   const lineH = block.lineHeights ? Math.max(...block.lineHeights) : block.fontSize * 1.2;
 
@@ -524,40 +421,25 @@ function buildParagraph(block, bodySize, typographyContext) {
     spacingBefore = 0;
     spacingAfter = 160;
   } else if (isHeading) {
-    // Headings: use gap before if it's significant (> half a line)
     const gapBefore = block._gapBefore || 0;
     spacingBefore = gapBefore > lineH * 0.3 ? ptToTwips(gapBefore) : Math.round(halfPoints * 12);
     spacingAfter = 0;
   } else {
-    // Body / list / other: use computed gaps
     const gapBefore = block._gapBefore || 0;
     const gapAfter = block._gapAfter || 0;
-
-    // Convert gaps to twips, clamping to reasonable values
-    // A gap of ~1 line height is normal paragraph separation
     if (gapBefore > lineH * 0.4) {
       spacingBefore = ptToTwips(gapBefore);
     }
     if (gapAfter > lineH * 0.4) {
       spacingAfter = ptToTwips(gapAfter);
     }
-
-    // Cap to prevent huge blank spaces (max ~3 lines of spacing)
     const maxSpacing = ptToTwips(lineH * 3);
     spacingBefore = Math.min(spacingBefore, maxSpacing);
     spacingAfter = Math.min(spacingAfter, maxSpacing);
   }
 
-  // ── LINE SPACING: computed from baseline Y positions ─────────────────
   if (block.lineCount > 1 && block.computedLineSpacing > 0) {
-    // computedLineSpacing is in PDF points (baseline-to-baseline distance)
-    // Word line spacing is in 240ths of a line (single = 240, 1.5 = 360, double = 480)
-    // Or can be specified in twips (absolute)
-    const baselineGap = block.computedLineSpacing;
-    const singleSpacing = lineH * 1.2; // normal single spacing
-
-    // Use absolute line spacing in twips for precision
-    lineSpacing = ptToTwips(baselineGap);
+    lineSpacing = ptToTwips(block.computedLineSpacing);
   }
 
   const runs = buildTextRuns(block, fontName, halfPoints, typographyContext);
@@ -572,7 +454,6 @@ function buildParagraph(block, bodySize, typographyContext) {
     },
   };
 
-  // Style selection
   if (headingLevel === 'title') {
     paragraphConfig.style = 'Title';
   } else if (isHeading && headingLevel) {
@@ -581,7 +462,6 @@ function buildParagraph(block, bodySize, typographyContext) {
     paragraphConfig.style = 'BodyText';
   }
 
-  // List items: use Word numbering
   if (block.isListItem && block.listItemType === 'bullet') {
     paragraphConfig.numbering = {
       reference: 'pdf-list',
@@ -590,19 +470,16 @@ function buildParagraph(block, bodySize, typographyContext) {
     paragraphConfig.style = 'ListParagraph';
   }
 
-  // ── INDENTATION: computed from PDF geometry ──────────────────────────
   const pageWidth = block.pageWidth || 612;
-  const contentLeft = 72; // ~1 inch
+  const contentLeft = 72;
   const contentRight = pageWidth - 72;
 
-  // Left indent: from leftmost content to page content boundary
   if (block.leftX > contentLeft + 5) {
     const leftIndentPt = block.leftX - contentLeft;
     paragraphConfig.indent = paragraphConfig.indent || {};
     paragraphConfig.indent.left = Math.max(0, ptToTwips(leftIndentPt));
   }
 
-  // First-line indent: difference between first line and continuation lines
   if (block.lineCount > 1 && block.firstLineX !== undefined && block.continuationLineX !== undefined) {
     const firstLineIndentPt = block.firstLineX - block.continuationLineX;
     if (Math.abs(firstLineIndentPt) > 3) {
@@ -611,7 +488,6 @@ function buildParagraph(block, bodySize, typographyContext) {
     }
   }
 
-  // Right indent: from rightmost content to page content boundary
   const actualRight = block.rightX || (block.leftX + (block.width || 0));
   if (actualRight < contentRight - 10 && actualRight > contentLeft) {
     const rightIndentPt = contentRight - actualRight;
@@ -624,21 +500,9 @@ function buildParagraph(block, bodySize, typographyContext) {
   return new Paragraph(paragraphConfig);
 }
 
-/**
- * Convert PDF points to Word twips (1 point = 20 twips).
- */
-function ptToTwips(pt) {
-  return Math.round(pt * 20);
-}
-
-/**
- * Build a DOCX paragraph containing an embedded image.
- * Preserves aspect ratio and approximate display size.
- */
 function buildImageParagraph(imageData, typographyContext) {
   if (!imageData || !imageData.imageBuffer) return null;
 
-  // Determine image type for docx
   let imageType;
   switch (imageData.format) {
     case 'jpeg': imageType = 'jpg'; break;
@@ -646,17 +510,12 @@ function buildImageParagraph(imageData, typographyContext) {
     default: imageType = 'png'; break;
   }
 
-  // Compute display size in pixels at 96 DPI
-  // 1 PDF point = 1/72 inch = 96/72 = 1.333 pixels at 96 DPI
-  // Use draw dimensions (how the image is displayed, not native pixel size)
   const drawWidthPt = imageData.drawWidth || imageData.width;
   const drawHeightPt = imageData.drawHeight || imageData.height;
 
-  // Convert PDF points to pixels at 96 DPI
   let finalWidth = Math.round(drawWidthPt * 96 / 72);
   let finalHeight = Math.round(drawHeightPt * 96 / 72);
 
-  // Cap to reasonable page bounds (max ~500pt = ~667px wide)
   const maxWidthPx = 667;
   if (finalWidth > maxWidthPx) {
     const scale = maxWidthPx / finalWidth;
@@ -664,7 +523,6 @@ function buildImageParagraph(imageData, typographyContext) {
     finalHeight = Math.round(finalHeight * scale);
   }
 
-  // Ensure minimum size
   if (finalWidth < 10) finalWidth = 10;
   if (finalHeight < 10) finalHeight = 10;
 
@@ -678,8 +536,7 @@ function buildImageParagraph(imageData, typographyContext) {
       type: imageType,
     });
 
-    // Center the image if it's narrow (typical for figures)
-    const isCentered = finalWidth < 400; // less than ~300pt = likely a figure
+    const isCentered = finalWidth < 400;
 
     return new Paragraph({
       children: [imageRun],
@@ -687,20 +544,10 @@ function buildImageParagraph(imageData, typographyContext) {
       spacing: { before: 60, after: 60 },
     });
   } catch (e) {
-    // If image insertion fails, return null (don't break the pipeline)
     return null;
   }
 }
 
-/**
- * Build TextRuns for a block.
- * Merges adjacent items with the same formatting into single runs,
- * preventing character-level fragmentation.
- *
- * Special handling for ABSTRACT/INDEX_TERMS zones:
- * The label ("Abstract—"/"Index Terms—") is italic+not-bold,
- * the body text is bold+not-italic.
- */
 function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
   const runs = [];
   const bodyFontSize = 10;
@@ -717,7 +564,6 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
         const itemFont = mapFontName(item.fontName, typographyContext);
         const itemSize = fontSizeToHalfPoints(item.fontSize || block.fontSize);
 
-        // Determine bold/italic per item based on font metadata and context
         let itemBold, itemItalic;
         if (zone === 'ABSTRACT' || zone === 'INDEX_TERMS') {
           const isLabelItem = isLabelItemInZone(item, line, block, zone);
@@ -730,16 +576,13 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
           itemBold = false;
           itemItalic = item.fontItalic || false;
         } else {
-          // Body text: only apply bold if the item text is SHORT
-          // (short bold items are likely emphasis, table headers, etc.)
-          // Long body text items using bold fonts are likely mis-mapped
           const textLen = (item.str || '').trim().length;
           itemBold = item.fontBold && textLen < 30;
           itemItalic = item.fontItalic || false;
         }
 
         const itemSuperScript = (item.fontSize || block.fontSize) <= 7.5 && (item.fontSize || block.fontSize) >= 5.0;
-        const key = `${itemFont}_${itemSize}_${itemBold}_${itemItalic}_${itemSuperScript}`;
+        const key = itemFont + '_' + itemSize + '_' + itemBold + '_' + itemItalic + '_' + itemSuperScript;
 
         if (mergedItems.length > 0) {
           const last = mergedItems[mergedItems.length - 1];
@@ -749,7 +592,7 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
           }
         }
 
-        mergedItems.push({ key, text: item.str, font: itemFont, size: itemSize, bold: itemBold, italic: itemItalic, superScript: itemSuperScript });
+        mergedItems.push({ key: key, text: item.str, font: itemFont, size: itemSize, bold: itemBold, italic: itemItalic, superScript: itemSuperScript });
       }
     }
 
@@ -783,36 +626,26 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
   return runs;
 }
 
-/**
- * Determine if an item is part of the label in ABSTRACT/INDEX_TERMS zones.
- * The label is the text before the body starts (e.g., "Abstract—" or "Index Terms—").
- */
 function isLabelItemInZone(item, line, block, zone) {
-  // Build cumulative text from the start of the block to this item
   const text = block.text || '';
   let labelPattern;
   if (zone === 'ABSTRACT') {
-    labelPattern = /^Abstract[—–\-]\s*/i;
+    labelPattern = /^Abstract[\u201C\u201D\-]\s*/i;
   } else if (zone === 'INDEX_TERMS') {
-    labelPattern = /^Index Terms[—–\-]\s*/i;
+    labelPattern = /^Index Terms[\u201C\u201D\-]\s*/i;
   } else {
     return false;
   }
 
-  // If the block text matches the label pattern, check if this item's text
-  // falls within the label portion
   const match = text.match(labelPattern);
   if (!match) return false;
 
   const labelLength = match[0].length;
 
-  // Find cumulative character position of this item in the block
   let charPos = 0;
   for (const line2 of block.lines) {
     for (const item2 of line2.items) {
       if (item2 === item) {
-        // Check if this item overlaps with the label portion
-        const itemEnd = charPos + (item.str || '').length;
         return charPos < labelLength;
       }
       charPos += (item2.str || '').length;
@@ -822,9 +655,6 @@ function isLabelItemInZone(item, line, block, zone) {
   return false;
 }
 
-/**
- * Build a docx Table from a detected table structure.
- */
 function buildTable(table, bodySize, typographyContext) {
   if (!table || !table.rows || table.rows.length === 0) return null;
 
@@ -862,7 +692,7 @@ function buildTable(table, bodySize, typographyContext) {
           new Paragraph({
             children: [
               new TextRun({
-                text,
+                text: text,
                 font: typographyContext?.defaultFont || 'Times New Roman',
                 size: fontSizeToHalfPoints(cellFontSize),
                 bold: isBold,
@@ -889,23 +719,17 @@ function buildTable(table, bodySize, typographyContext) {
   });
 }
 
-/**
- * Compute approximate column widths based on table structure.
- * Uses column positions to compute proportional widths.
- */
 function computeColumnWidths(table, columns) {
   if (table.columnPositions && table.columnPositions.length >= 2) {
     const positions = [...table.columnPositions].sort((a, b) => a - b);
     const totalSpan = positions[positions.length - 1] - positions[0];
     if (totalSpan > 0) {
-      // Use proportional widths based on column positions
       const widths = [];
       for (let i = 0; i < columns; i++) {
         if (i < positions.length - 1) {
           const colWidth = Math.round(((positions[i + 1] - positions[i]) / 72) * 1440);
           widths.push(Math.max(colWidth, 500));
         } else if (i === positions.length - 1) {
-          // Last column: extend to end of table
           const lastWidth = Math.round(((positions[i] - positions[i - 1]) / 72) * 1440);
           widths.push(Math.max(lastWidth, 500));
         } else {
@@ -916,7 +740,6 @@ function computeColumnWidths(table, columns) {
     }
   }
 
-  // Fallback: equal widths
   const totalWidth = 9000;
   const equalWidth = Math.round(totalWidth / columns);
   return Array(columns).fill(equalWidth);

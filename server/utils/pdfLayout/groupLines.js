@@ -1,22 +1,25 @@
-/**
- * Group text items into visual lines based on vertical proximity.
+﻿/**
+ * Group visual lines into text items into visual lines based on vertical proximity.
  *
  * Items on the same visual line have:
  *   - similar Y baseline (within a tolerance based on font size)
  *   - overlapping or adjacent vertical bounding boxes
+ *   - similar X position (within the same column when columns are detected)
  *
  * Within each line, items are sorted left-to-right by X coordinate.
  *
- * @param {object[]} items – text items from extractTextItems (single page)
- * @param {number} [pageHeight] – page height for coordinate reference
- * @returns {object[]} lines – array of { items: object[], y, x, width, height, fontSize, pageIndex }
+ * @param {object[]} items - text items from extractTextItems (single page)
+ * @param {number} [pageHeight] - page height for coordinate reference
+ * @param {object} [options] - { columnInfo } for column-aware grouping
+ * @returns {object[]} lines - array of { items: object[], y, x, width, height, fontSize, pageIndex }
  */
-function groupLines(items, pageHeight) {
+function groupLines(items, pageHeight, options = {}) {
   if (!items || items.length === 0) return [];
 
-  // Filter out empty strings that are just EOL markers
   const meaningful = items.filter((it) => it.str.trim().length > 0 || it.width > 0);
   if (meaningful.length === 0) return [];
+
+  const columnInfo = options.columnInfo || null;
 
   // Sort by Y descending (top of page first in PDF coords = highest Y value),
   // then by X ascending
@@ -46,7 +49,15 @@ function groupLines(items, pageHeight) {
     // Check vertical distance (gap between baselines should be small relative to font size)
     const verticalGap = Math.abs(item.y - prev.y);
 
-    if ((sameBaseline || yOverlap) && verticalGap <= tolerance) {
+    // Column check: items in different columns should NOT be on the same line
+    let sameColumn = true;
+    if (columnInfo && columnInfo.count > 1) {
+      const prevCol = getColumnIndex(prev.x, columnInfo);
+      const itemCol = getColumnIndex(item.x, columnInfo);
+      if (prevCol !== itemCol) sameColumn = false;
+    }
+
+    if ((sameBaseline || yOverlap) && verticalGap <= tolerance && sameColumn) {
       currentLine.push(item);
     } else {
       lines.push(finalizeLine(currentLine));
@@ -59,11 +70,31 @@ function groupLines(items, pageHeight) {
 }
 
 /**
+ * Get the column index for an item based on its X position.
+ */
+function getColumnIndex(x, columnInfo) {
+  if (!columnInfo || columnInfo.count <= 1) return 0;
+
+  // Check if in the gap (full-width)
+  if (columnInfo.gapStart !== undefined && x >= columnInfo.gapStart && x <= columnInfo.gapEnd) {
+    return -1;
+  }
+
+  // Assign to nearest column
+  let bestColumn = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < columnInfo.columns.length; i++) {
+    const dist = Math.abs(x - columnInfo.columns[i].center);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestColumn = i;
+    }
+  }
+  return bestColumn;
+}
+
+/**
  * Determine whether a text item is an explicit PDF space character.
- *
- * PDF.js sometimes returns space characters as separate items with
- * str=" " and a measurable width (~0.25× fontSize). These are real
- * spaces that must be preserved in the reconstructed text.
  */
 function isSpaceItem(item) {
   return item.str.trim() === '' && item.str.length > 0 && item.width > 0.1 * item.fontSize;
@@ -71,17 +102,6 @@ function isSpaceItem(item) {
 
 /**
  * Reconstruct line text from sorted items with correct word spacing.
- *
- * Algorithm:
- *   1. Items with str=" " and width > 0.1×fontSize are explicit spaces.
- *   2. Explicit space items are inserted as word boundaries.
- *   3. Non-space items are concatenated directly (no space inserted).
- *   4. Items containing internal spaces (e.g. "Department of") are
- *      preserved as-is.
- *   5. Leading/trailing whitespace is trimmed from the final result.
- *
- * @param {object[]} sortedItems – items sorted left-to-right by x
- * @returns {string} reconstructed line text with correct word spacing
  */
 function buildLineText(sortedItems) {
   const parts = [];
@@ -91,8 +111,6 @@ function buildLineText(sortedItems) {
     const str = item.str;
 
     if (isSpaceItem(item)) {
-      // Explicit PDF space — insert a single space.
-      // Avoid doubling if the previous part already ends with a space.
       if (parts.length > 0 && !parts[parts.length - 1].endsWith(' ')) {
         parts.push(' ');
       }
@@ -105,9 +123,6 @@ function buildLineText(sortedItems) {
       continue;
     }
 
-    // For non-space items, concatenate directly.
-    // Do NOT insert a gap-based space here — PDF explicit space items
-    // are the authoritative source of word boundaries.
     parts.push(str);
     prevRightEdge = item.x + item.width;
   }
@@ -119,20 +134,16 @@ function buildLineText(sortedItems) {
  * Compute aggregate properties for a line from its items.
  */
 function finalizeLine(lineItems) {
-  // Sort items left to right
   const sorted = [...lineItems].sort((a, b) => a.x - b.x);
 
   const leftX = sorted[0].x;
   const rightEdge = Math.max(...sorted.map((it) => it.x + it.width));
   const maxWidth = sorted[0].pageWidth || 612;
 
-  // Determine the dominant font size (largest)
   const dominantFontSize = Math.max(...sorted.map((it) => it.fontSize));
 
-  // Reconstruct text with correct word spacing
   const text = buildLineText(sorted);
 
-  // If text is just whitespace/empty and all items have zero width, skip
   if (!text && sorted.every((it) => it.width === 0)) {
     return null;
   }
@@ -152,7 +163,6 @@ function finalizeLine(lineItems) {
     pageIndex: sorted[0].pageIndex,
     pageWidth: maxWidth,
     pageHeight: sorted[0].pageHeight || 792,
-    // Compute alignment hint
     centerX: leftX + (rightEdge - leftX) / 2,
     pageCenterX: maxWidth / 2,
   };
