@@ -290,8 +290,8 @@ function computePageMargins(pages) {
   // Left/right from content bounding box (reliable)
   const minLeftX = Math.min(...allBlocks.filter((b) => b.leftX > 0).map((b) => b.leftX));
   const maxRightX = Math.max(...allBlocks.filter((b) => b.rightX > 0).map((b) => b.rightX));
-  const left = Math.round((minLeftX / 72) * 1440);
-  const right = Math.round(((pageWidth - maxRightX) / 72) * 1440);
+  const left = Math.max(0, Math.round((minLeftX / 72) * 1440));
+  const right = Math.max(0, Math.round(((pageWidth - maxRightX) / 72) * 1440));
 
   // For top/bottom: use standard A4 academic paper margins
   // (computed values are unreliable due to headers/titles near page edges)
@@ -599,7 +599,7 @@ function buildParagraph(block, bodySize, typographyContext) {
   if (block.leftX > contentLeft + 5) {
     const leftIndentPt = block.leftX - contentLeft;
     paragraphConfig.indent = paragraphConfig.indent || {};
-    paragraphConfig.indent.left = ptToTwips(leftIndentPt);
+    paragraphConfig.indent.left = Math.max(0, ptToTwips(leftIndentPt));
   }
 
   // First-line indent: difference between first line and continuation lines
@@ -607,9 +607,7 @@ function buildParagraph(block, bodySize, typographyContext) {
     const firstLineIndentPt = block.firstLineX - block.continuationLineX;
     if (Math.abs(firstLineIndentPt) > 3) {
       paragraphConfig.indent = paragraphConfig.indent || {};
-      // Negative firstLineX diff means first line starts LEFT of continuation (hanging indent)
-      // Positive means first line starts RIGHT of continuation (standard first-line indent)
-      paragraphConfig.indent.firstLine = ptToTwips(Math.max(firstLineIndentPt, -100));
+      paragraphConfig.indent.firstLine = Math.max(0, ptToTwips(firstLineIndentPt));
     }
   }
 
@@ -619,7 +617,7 @@ function buildParagraph(block, bodySize, typographyContext) {
     const rightIndentPt = contentRight - actualRight;
     if (rightIndentPt > 3) {
       paragraphConfig.indent = paragraphConfig.indent || {};
-      paragraphConfig.indent.right = ptToTwips(rightIndentPt);
+      paragraphConfig.indent.right = Math.max(0, ptToTwips(rightIndentPt));
     }
   }
 

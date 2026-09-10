@@ -120,9 +120,11 @@ function detectParagraphBreak(prevLine, newLine, currentBlock, bodyFontSize) {
   if (isSectionHeading(newLine)) return true;
   if (isSubsectionHeading(newLine)) return true;
 
-  // 4. Font size change (heading vs body)
+  // 4. Font size change — only break for large structural differences (heading vs body)
+  //    Small differences (e.g. 10pt → 7pt superscript) are inline formatting and should
+  //    stay in the same paragraph so buildTextRuns can produce proper transitions.
   const fontSizeRatio = newLine.fontSize / prevLine.fontSize;
-  if (fontSizeRatio > 1.2 || fontSizeRatio < 0.8) return true;
+  if (fontSizeRatio > 1.5 || fontSizeRatio < 0.67) return true;
 
   // 5. First-line indentation
   const indentDiff = newLine.x - prevLine.x;
@@ -152,23 +154,6 @@ function detectParagraphBreak(prevLine, newLine, currentBlock, bodyFontSize) {
   // 9. Very large vertical jump
   const verticalJump = Math.abs(prevLine.y - newLine.y);
   if (verticalJump > avgHeight * 3) return true;
-
-  // 10. Different font name (different font variant = different style)
-  // Only break if the font change is significant (not just spacing/symbol variants)
-  if (newLine.fontName !== prevLine.fontName && currentBlock.length > 0) {
-    // Don't break within TITLE zone (title can span multiple lines with same font)
-    const zone = newLine.zone || prevLine.zone || 'BODY';
-    if (zone === 'TITLE' || zone === 'AUTHOR' || zone === 'ABSTRACT' || zone === 'INDEX_TERMS') {
-      return false;
-    }
-    // Don't break for single-character font changes (likely symbols/punctuation)
-    if (newLine.text.trim().length > 3 && prevLine.text.trim().length > 3) {
-      // Only break if the font sizes are the same (same style, different variant)
-      if (Math.abs(newLine.fontSize - prevLine.fontSize) < 0.5) {
-        return true;
-      }
-    }
-  }
 
   return false;
 }
