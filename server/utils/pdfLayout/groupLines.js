@@ -101,30 +101,125 @@ function isSpaceItem(item) {
 }
 
 /**
+ * Characters that should NOT have a space inserted before them.
+ */
+const NO_SPACE_BEFORE = new Set([',', '.', ';', ':', '!', '?', ')', ']', '}', '%', '\u2019', '\u201D', '\u2018', '\u201C']);
+
+/**
+ * Characters that should NOT have a space inserted after them.
+ */
+const NO_SPACE_AFTER = new Set(['(', '[', '{', '\u2018', '\u201C']);
+
+/**
+ * Determine whether a space should be inserted between two adjacent text items.
+ *
+ * Uses geometric gap analysis:
+ *   - Positive gap (even tiny) between non-space items → word boundary
+ *   - Zero/negative gap → use linguistic heuristics
+ *
+ * @param {object} prevItem - the preceding text item
+ * @param {object} nextItem - the following text item
+ * @param {boolean} hasExplicitSpace - whether an explicit space item exists between them
+ * @returns {boolean}
+ */
+function shouldInsertSpace(prevItem, nextItem, hasExplicitSpace) {
+  if (hasExplicitSpace) return true;
+
+  const prevStr = (prevItem.str || '').trim();
+  const nextStr = (nextItem.str || '').trim();
+
+  if (prevStr.length === 0 || nextStr.length === 0) return false;
+
+  const prevRight = prevItem.x + prevItem.width;
+  const gap = nextItem.x - prevRight;
+
+  const fontSize = Math.max(prevItem.fontSize || 10, nextItem.fontSize || 10);
+  const minGapThreshold = 0.15;
+
+  // Positive gap between items → likely a word boundary
+  // Use a very low threshold: any measurable gap above floating-point noise
+  if (gap > minGapThreshold) {
+    const lastChar = prevStr[prevStr.length - 1];
+    const firstChar = nextStr[0];
+    if (NO_SPACE_BEFORE.has(firstChar)) return false;
+    if (NO_SPACE_AFTER.has(lastChar)) return false;
+    return true;
+  }
+
+  // Near-zero gap (items touch or nearly touch)
+  if (gap > -fontSize * 0.1 && gap <= minGapThreshold) {
+    const lastChar = prevStr[prevStr.length - 1];
+    const firstChar = nextStr[0];
+
+    if (NO_SPACE_BEFORE.has(firstChar)) return false;
+    if (NO_SPACE_AFTER.has(lastChar)) return false;
+
+    // camelCase boundary: lowercase followed by uppercase → word boundary
+    if (lastChar === lastChar.toLowerCase() && firstChar === firstChar.toUpperCase() && firstChar !== firstChar.toLowerCase()) {
+      return true;
+    }
+
+    // Uppercase followed by uppercase+lowercase → potential word boundary
+    // e.g., "AB" + "testing" → "AB testing"
+    if (prevStr.length <= 3 && lastChar === lastChar.toUpperCase() && firstChar === firstChar.toUpperCase() && nextStr.length > 1 && nextStr[1] === nextStr[1].toLowerCase()) {
+      return true;
+    }
+
+    // Items at exact character boundaries (gap ≈ 0) with both lowercase
+    // In real PDFs, split words have negative gaps (kerning overlap).
+    // Exact touches are likely separate words at character boundaries.
+    if (Math.abs(gap) < 0.2 && lastChar === lastChar.toLowerCase() && firstChar === firstChar.toLowerCase()) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Reconstruct line text from sorted items with correct word spacing.
+ * Uses geometric gap analysis to insert spaces between separate word items.
  */
 function buildLineText(sortedItems) {
-  const parts = [];
-  let prevRightEdge = null;
+  const nonEmpty = sortedItems.filter((it) => {
+    const str = it.str || '';
+    return str.length > 0;
+  });
 
-  for (const item of sortedItems) {
+  if (nonEmpty.length === 0) return '';
+
+  const parts = [];
+
+  for (let i = 0; i < nonEmpty.length; i++) {
+    const item = nonEmpty[i];
     const str = item.str;
 
     if (isSpaceItem(item)) {
       if (parts.length > 0 && !parts[parts.length - 1].endsWith(' ')) {
         parts.push(' ');
       }
-      prevRightEdge = item.x + item.width;
       continue;
     }
 
-    if (!str || str.length === 0) {
-      prevRightEdge = item.x + item.width;
-      continue;
+    if (parts.length > 0) {
+      const prevItem = nonEmpty[i - 1];
+      const prevIsSpace = isSpaceItem(prevItem);
+
+      if (!prevIsSpace) {
+        const prevStr = (prevItem.str || '').trim();
+        if (prevStr.length > 0) {
+          const lastChar = prevStr[prevStr.length - 1];
+          if (lastChar !== ' ' && !parts[parts.length - 1].endsWith(' ')) {
+            const insertSpace = shouldInsertSpace(prevItem, item, false);
+            if (insertSpace) {
+              parts.push(' ');
+            }
+          }
+        }
+      }
     }
 
     parts.push(str);
-    prevRightEdge = item.x + item.width;
   }
 
   return parts.join('').trim();
@@ -168,4 +263,4 @@ function finalizeLine(lineItems) {
   };
 }
 
-module.exports = { groupLines };
+module.exports = { groupLines, shouldInsertSpace };

@@ -40,6 +40,7 @@ const {
 } = require('docx');
 
 const { mapFontName, fontSizeToHalfPoints, classifyFontSizes } = require('./analyzeTypography');
+const { shouldInsertSpace } = require('./groupLines');
 
 const HEADING_LEVELS = {
   1: HeadingLevel.HEADING_1,
@@ -556,9 +557,14 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
   if (block.lines && block.lines.length > 0) {
     const mergedItems = [];
     const zone = block.zone || '';
+    let prevItem = null;
+    let prevLineIndex = -1;
 
-    for (const line of block.lines) {
-      for (const item of line.items) {
+    for (let lineIdx = 0; lineIdx < block.lines.length; lineIdx++) {
+      const line = block.lines[lineIdx];
+
+      for (let itemIdx = 0; itemIdx < line.items.length; itemIdx++) {
+        const item = line.items[itemIdx];
         if (!item.str) continue;
 
         const itemFont = mapFontName(item.fontName, typographyContext);
@@ -584,15 +590,60 @@ function buildTextRuns(block, fontFamily, halfPoints, typographyContext) {
         const itemSuperScript = (item.fontSize || block.fontSize) <= 7.5 && (item.fontSize || block.fontSize) >= 5.0;
         const key = itemFont + '_' + itemSize + '_' + itemBold + '_' + itemItalic + '_' + itemSuperScript;
 
+        // Determine if we should insert a space before this item
+        let insertSpace = false;
+        const isSpaceItem = item.str.trim() === '' && item.str.length > 0 && item.width > 0.1 * (item.fontSize || 10);
+
+        if (isSpaceItem) {
+          // Explicit space item: add space to previous merged item
+          if (mergedItems.length > 0) {
+            const last = mergedItems[mergedItems.length - 1];
+            if (!last.text.endsWith(' ')) {
+              last.text += ' ';
+            }
+          }
+          prevItem = item;
+          prevLineIndex = lineIdx;
+          continue;
+        }
+
+        if (item.str.trim().length === 0) {
+          prevItem = item;
+          prevLineIndex = lineIdx;
+          continue;
+        }
+
+        // Insert space at line transitions (within same block)
+        if (prevItem && prevLineIndex !== lineIdx && !isSpaceItem && item.str.trim().length > 0 && mergedItems.length > 0) {
+          insertSpace = true;
+        }
+
+        // Check if we need to insert a space between previous text item and this one (same line)
+        if (!insertSpace && prevItem && prevLineIndex === lineIdx && !isSpaceItem && prevItem.str && prevItem.str.trim().length > 0) {
+          const prevIsSpaceItem = prevItem.str.trim() === '' && prevItem.str.length > 0 && prevItem.width > 0.1 * (prevItem.fontSize || 10);
+          if (!prevIsSpaceItem) {
+            insertSpace = shouldInsertSpace(prevItem, item, false);
+          }
+        }
+
         if (mergedItems.length > 0) {
           const last = mergedItems[mergedItems.length - 1];
           if (last.key === key) {
+            if (insertSpace && !last.text.endsWith(' ')) {
+              last.text += ' ';
+            }
             last.text += item.str;
+            prevItem = item;
+            prevLineIndex = lineIdx;
             continue;
           }
         }
 
-        mergedItems.push({ key: key, text: item.str, font: itemFont, size: itemSize, bold: itemBold, italic: itemItalic, superScript: itemSuperScript });
+        // If inserting space but keys differ, add space to new run
+        const textWithSpace = (insertSpace ? ' ' : '') + item.str;
+        mergedItems.push({ key: key, text: textWithSpace, font: itemFont, size: itemSize, bold: itemBold, italic: itemItalic, superScript: itemSuperScript });
+        prevItem = item;
+        prevLineIndex = lineIdx;
       }
     }
 
