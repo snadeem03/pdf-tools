@@ -186,19 +186,20 @@ function buildLayoutSegments(pages, images) {
       continue;
     }
 
+    const allElements = [];
     for (const zone of layout.zones) {
-      const elements = zone.elements.map(el => ({ ...el, _sourcePageIndex: page.pageIndex }));
-      const columnCount = zone.type === 'fullWidth' ? 1 : layout.columnCount;
-
-      segments.push({
-        columnCount,
-        elements,
-        pageIndex: page.pageIndex,
-        isFirstPage: page.pageIndex === 0 && segments.length === 0,
-        isLastPage: page.pageIndex === pages.length - 1,
-        zoneType: zone.type,
-      });
+      for (const el of zone.elements) {
+        allElements.push({ ...el, _sourcePageIndex: page.pageIndex, _zoneType: zone.type });
+      }
     }
+
+    segments.push({
+      columnCount: layout.columnCount,
+      elements: allElements,
+      pageIndex: page.pageIndex,
+      isFirstPage: page.pageIndex === 0 && segments.length === 0,
+      isLastPage: page.pageIndex === pages.length - 1,
+    });
   }
 
   return segments;
@@ -208,7 +209,6 @@ function buildSectionsFromSegments(segments, pages, headerFooter, pageMargins, b
   if (segments.length === 0) return [];
 
   const sections = [];
-  let prevColumnCount = 0;
 
   for (let segIdx = 0; segIdx < segments.length; segIdx++) {
     const segment = segments[segIdx];
@@ -220,25 +220,6 @@ function buildSectionsFromSegments(segments, pages, headerFooter, pageMargins, b
     const sectionWidth = Math.round((pageWidth / 72) * 1440);
     const sectionHeight = Math.round((pageHeight / 72) * 1440);
     const margins = pageMargins[pageIdx] || { top: 720, bottom: 720, left: 708, right: 708 };
-
-    let sectionType = undefined;
-    if (segIdx > 0) {
-      const prevSeg = segments[segIdx - 1];
-      if (prevSeg.pageIndex !== segment.pageIndex) {
-        sectionType = undefined;
-      } else if (prevSeg.columnCount !== segment.columnCount) {
-        sectionType = SectionType.CONTINUOUS;
-      } else {
-        if (sections.length > 0) {
-          const prevSection = sections[sections.length - 1];
-          for (const el of segment.elements) {
-            const child = buildElement(el, bodySize, typographyContext);
-            if (child) prevSection.children.push(child);
-          }
-          continue;
-        }
-      }
-    }
 
     const children = [];
     for (const el of segment.elements) {
@@ -266,10 +247,6 @@ function buildSectionsFromSegments(segments, pages, headerFooter, pageMargins, b
       children,
     };
 
-    if (sectionType) {
-      sectionConfig.properties.type = sectionType;
-    }
-
     if (segment.columnCount > 1) {
       const layout = page.layout;
       const gap = (layout && layout.columnGap > 0) ? layout.columnGap : 36;
@@ -292,7 +269,6 @@ function buildSectionsFromSegments(segments, pages, headerFooter, pageMargins, b
     }
 
     sections.push(sectionConfig);
-    prevColumnCount = segment.columnCount;
   }
 
   return sections;
