@@ -255,7 +255,7 @@ function buildLayoutZones(classified, columnInfo, contentBounds) {
       ...classified.tables.map(t => ({ ...t, _elementType: 'table' })),
       ...classified.images.map(i => ({ ...i, _elementType: 'image' })),
     ];
-    allElements.sort((a, b) => (a.topY || a.y || 0) - (b.topY || b.y || 0));
+    allElements.sort((a, b) => (b.topY || b.y || 0) - (a.topY || a.y || 0));
     if (allElements.length === 0) return [];
     return [{
       type: 'fullWidth',
@@ -272,7 +272,7 @@ function buildLayoutZones(classified, columnInfo, contentBounds) {
     ...classified.images.map(i => ({ ...i, _elementType: 'image' })),
   ];
   if (allElements.length === 0) return [];
-  allElements.sort((a, b) => (a.topY || a.y || 0) - (b.topY || b.y || 0));
+  allElements.sort((a, b) => (b.topY || b.y || 0) - (a.topY || a.y || 0));
 
   const zones = [];
   let currentZone = null;
@@ -338,11 +338,28 @@ function buildLayoutZones(classified, columnInfo, contentBounds) {
 }
 
 function finalizeZone(zone) {
+  const elements = zone.elements;
+  if (zone.type === 'columns' && zone.columnAssignments) {
+    const reordered = [];
+    const colIndices = Object.keys(zone.columnAssignments).map(Number).sort((a, b) => a - b);
+    for (const colIdx of colIndices) {
+      const colEls = zone.columnAssignments[colIdx];
+      colEls.sort((a, b) => (b.topY || b.y || 0) - (a.topY || a.y || 0));
+      reordered.push(...colEls);
+    }
+    return {
+      type: zone.type,
+      top: zone.top,
+      bottom: zone.bottom,
+      elements: reordered,
+      columnAssignments: zone.columnAssignments,
+    };
+  }
   return {
     type: zone.type,
     top: zone.top,
     bottom: zone.bottom,
-    elements: zone.elements,
+    elements,
     columnAssignments: zone.columnAssignments || {},
   };
 }
@@ -352,13 +369,13 @@ function computeReadingOrder(zones) {
   let orderIndex = 0;
   for (const zone of zones) {
     if (zone.type === 'fullWidth') {
-      const sorted = [...zone.elements].sort((a, b) => (a.topY || a.y || 0) - (b.topY || b.y || 0));
+      const sorted = [...zone.elements].sort((a, b) => (b.topY || b.y || 0) - (a.topY || a.y || 0));
       for (const el of sorted) { el._readingOrder = orderIndex++; ordered.push(el); }
     } else {
       const columnIndices = Object.keys(zone.columnAssignments).map(Number).sort((a, b) => a - b);
       for (const colIdx of columnIndices) {
         const colElements = zone.columnAssignments[colIdx];
-        const sorted = [...colElements].sort((a, b) => (a.topY || a.y || 0) - (b.topY || b.y || 0));
+        const sorted = [...colElements].sort((a, b) => (b.topY || b.y || 0) - (a.topY || a.y || 0));
         for (const el of sorted) { el._readingOrder = orderIndex++; ordered.push(el); }
       }
     }

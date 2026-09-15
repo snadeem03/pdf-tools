@@ -154,23 +154,50 @@ function detectColumnsFromItems(items, pageWidth) {
     return { count: 1, columns: [], gap: 0, gapCenter: pageWidth / 2 };
   }
 
-  const centerX = minX + contentWidth / 2;
-  const leftItems = textItems.filter(i => i.x < centerX);
-  const rightItems = textItems.filter(i => i.x >= centerX);
+  const xCounts = {};
+  for (const item of textItems) {
+    const key = Math.round(item.x);
+    xCounts[key] = (xCounts[key] || 0) + 1;
+  }
+
+  const sortedX = Object.entries(xCounts)
+    .map(([x, count]) => ({ x: Number(x), count }))
+    .sort((a, b) => a.x - b.x);
+
+  if (sortedX.length < 2) {
+    return { count: 1, columns: [], gap: 0, gapCenter: pageWidth / 2 };
+  }
+
+  let bestGap = 0;
+  let bestGapIdx = 0;
+  for (let i = 0; i < sortedX.length - 1; i++) {
+    const gap = sortedX[i + 1].x - sortedX[i].x;
+    if (gap > bestGap) {
+      bestGap = gap;
+      bestGapIdx = i;
+    }
+  }
+
+  if (bestGap < 25) {
+    return { count: 1, columns: [], gap: 0, gapCenter: pageWidth / 2 };
+  }
+
+  const leftXValues = sortedX.slice(0, bestGapIdx + 1);
+  const rightXValues = sortedX.slice(bestGapIdx + 1);
+
+  const leftItems = textItems.filter(i => {
+    const xi = Math.round(i.x);
+    return leftXValues.some(l => l.x === xi);
+  });
+  const rightItems = textItems.filter(i => {
+    const xi = Math.round(i.x);
+    return rightXValues.some(r => r.x === xi);
+  });
 
   if (leftItems.length < 3 || rightItems.length < 3) {
     return { count: 1, columns: [], gap: 0, gapCenter: pageWidth / 2 };
   }
 
-  const leftMaxX = Math.max(...leftItems.map(i => i.x));
-  const rightMinX = Math.min(...rightItems.map(i => i.x));
-  const gap = rightMinX - leftMaxX;
-
-  if (gap < 25) {
-    return { count: 1, columns: [], gap: 0, gapCenter: pageWidth / 2 };
-  }
-
-  // Verify items cluster at specific X positions on each side
   const leftXCounts = {};
   for (const item of leftItems) {
     const key = Math.round(item.x);
@@ -191,6 +218,10 @@ function detectColumnsFromItems(items, pageWidth) {
   if (leftClusterRatio < 0.25 || rightClusterRatio < 0.25) {
     return { count: 1, columns: [], gap: 0, gapCenter: pageWidth / 2 };
   }
+
+  const leftMaxX = Math.max(...leftItems.map(i => i.x));
+  const rightMinX = Math.min(...rightItems.map(i => i.x));
+  const gap = rightMinX - leftMaxX;
 
   return {
     count: 2,
@@ -307,7 +338,7 @@ function detectPageLayoutWithColumnInfo(page, images = []) {
 
 function buildZonesFromElements(allElements, columnInfo) {
   if (allElements.length === 0) return [];
-  allElements.sort((a, b) => (a.topY || a.y || 0) - (b.topY || b.y || 0));
+  allElements.sort((a, b) => (b.topY || b.y || 0) - (a.topY || a.y || 0));
 
   if (columnInfo.count <= 1) {
     return [{
@@ -379,6 +410,20 @@ function buildZonesFromElements(allElements, columnInfo) {
     }
   }
   if (currentZone) zones.push(currentZone);
+
+  for (const zone of zones) {
+    if (zone.type === 'columns' && zone.columnAssignments) {
+      const reordered = [];
+      const colIndices = Object.keys(zone.columnAssignments).map(Number).sort((a, b) => a - b);
+      for (const colIdx of colIndices) {
+        const colEls = zone.columnAssignments[colIdx];
+        colEls.sort((a, b) => (b.topY || b.y || 0) - (a.topY || a.y || 0));
+        reordered.push(...colEls);
+      }
+      zone.elements = reordered;
+    }
+  }
+
   return zones;
 }
 
@@ -387,13 +432,13 @@ function computeReadingOrderFromZones(zones) {
   let orderIndex = 0;
   for (const zone of zones) {
     if (zone.type === 'fullWidth') {
-      const sorted = [...zone.elements].sort((a, b) => (a.topY || a.y || 0) - (b.topY || b.y || 0));
+      const sorted = [...zone.elements].sort((a, b) => (b.topY || b.y || 0) - (a.topY || a.y || 0));
       for (const el of sorted) { el._readingOrder = orderIndex++; ordered.push(el); }
     } else {
       const columnIndices = Object.keys(zone.columnAssignments).map(Number).sort((a, b) => a - b);
       for (const colIdx of columnIndices) {
         const colElements = zone.columnAssignments[colIdx];
-        const sorted = [...colElements].sort((a, b) => (a.topY || a.y || 0) - (b.topY || b.y || 0));
+        const sorted = [...colElements].sort((a, b) => (b.topY || b.y || 0) - (a.topY || a.y || 0));
         for (const el of sorted) { el._readingOrder = orderIndex++; ordered.push(el); }
       }
     }
