@@ -6,9 +6,8 @@ const { extractTextItems } = require('./extractTextItems');
 const { extractImages } = require('./extractImages');
 const { groupLines } = require('./groupLines');
 const { classifyZones } = require('./classifyZones');
-const { groupBlocks, assignLineToColumn } = require('./groupBlocks');
+const { groupBlocks } = require('./groupBlocks');
 const { detectTables } = require('./detectTables');
-const { detectPageLayouts } = require('./detectPageLayout');
 const { buildDocx } = require('./buildDocx');
 const { analyzeDocumentTypography } = require('./analyzeTypography');
 

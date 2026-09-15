@@ -28,15 +28,12 @@ const {
   HeadingLevel,
   BorderStyle,
   WidthType,
-  ShadingType,
-  convertInchesToTwip,
   Header,
   Footer,
   Numbering,
   LevelFormat,
   convertMillimetersToTwip,
   SectionType,
-  Columns,
 } = require('docx');
 
 const { mapFontName, fontSizeToHalfPoints, classifyFontSizes } = require('./analyzeTypography');
