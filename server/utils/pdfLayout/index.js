@@ -219,7 +219,8 @@ function detectColumnsFromItems(items, pageWidth) {
     return { count: 1, columns: [], gap: 0, gapCenter: pageWidth / 2 };
   }
 
-  const leftMaxX = Math.max(...leftItems.map(i => i.x));
+  const leftRightEdges = leftItems.map(i => i.x + (i.width || 0)).sort((a, b) => a - b);
+  const leftMaxX = leftRightEdges[Math.floor(leftRightEdges.length * 0.9)] || leftRightEdges[leftRightEdges.length - 1];
   const rightMinX = Math.min(...rightItems.map(i => i.x));
   const gap = rightMinX - leftMaxX;
 
@@ -291,7 +292,7 @@ function detectPageLayoutWithColumnInfo(page, images = []) {
       const blockWidth = blockRight - blockLeft;
       if (columnInfo.columns.length > 0) {
         const contentWidth = columnInfo.columns[1].right - columnInfo.columns[0].left;
-        if (contentWidth > 0 && blockWidth > contentWidth * 0.65) {
+        if (contentWidth > 0 && blockWidth > contentWidth * 0.50) {
           el._column = -1;
           el._fullWidth = true;
         } else {
@@ -369,8 +370,9 @@ function buildZonesFromElements(allElements, columnInfo) {
     } else {
       const gap = elTop - currentZone.bottom;
       const lineHeight = el.height || el.fontSize || 12;
+      const gapThreshold = currentZone.type === 'fullWidth' ? lineHeight * 4 : lineHeight * 1.5;
 
-      if (gap > lineHeight * 1.5) {
+      if (gap > gapThreshold) {
         zones.push(currentZone);
         currentZone = {
           type: isFullWidth ? 'fullWidth' : 'columns',

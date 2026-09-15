@@ -166,6 +166,17 @@ async function buildDocx(pages, options = {}) {
   return Packer.toBuffer(doc);
 }
 
+function sortElementsColumnFirst(elements, gapCenter) {
+  elements.sort((a, b) => {
+    const aCenterX = (a.x || 0) + ((a.width || 0) / 2);
+    const bCenterX = (b.x || 0) + ((b.width || 0) / 2);
+    const aCol = aCenterX < gapCenter ? 0 : 1;
+    const bCol = bCenterX < gapCenter ? 0 : 1;
+    if (aCol !== bCol) return aCol - bCol;
+    return (b.topY || b.y || 0) - (a.topY || a.y || 0);
+  });
+}
+
 function buildLayoutSegments(pages, images) {
   const segments = [];
 
@@ -186,23 +197,103 @@ function buildLayoutSegments(pages, images) {
       continue;
     }
 
-    const allElements = [];
+    const pageColCount = layout.columnCount;
+    if (pageColCount <= 1) {
+      const allElements = [];
+      for (const zone of layout.zones) {
+        for (const el of zone.elements) {
+          allElements.push({ ...el, _sourcePageIndex: page.pageIndex, _zoneType: zone.type });
+        }
+      }
+      segments.push({
+        columnCount: 1,
+        elements: allElements,
+        pageIndex: page.pageIndex,
+        isFirstPage: page.pageIndex === 0 && segments.length === 0,
+        isLastPage: page.pageIndex === pages.length - 1,
+      });
+      continue;
+    }
+
+    const zoneGroups = [];
     for (const zone of layout.zones) {
-      for (const el of zone.elements) {
-        allElements.push({ ...el, _sourcePageIndex: page.pageIndex, _zoneType: zone.type });
+      const zoneType = zone.type === 'fullWidth' ? 'fullWidth' : 'columns';
+      if (zoneGroups.length > 0 && zoneGroups[zoneGroups.length - 1].type === zoneType) {
+        zoneGroups[zoneGroups.length - 1].zones.push(zone);
+      } else {
+        zoneGroups.push({ type: zoneType, zones: [zone] });
       }
     }
 
-    segments.push({
-      columnCount: layout.columnCount,
-      elements: allElements,
-      pageIndex: page.pageIndex,
-      isFirstPage: page.pageIndex === 0 && segments.length === 0,
-      isLastPage: page.pageIndex === pages.length - 1,
-    });
+    const mergedGroups = [];
+    for (let gi = 0; gi < zoneGroups.length; gi++) {
+      const group = zoneGroups[gi];
+
+      if (group.type === 'columns' && mergedGroups.length > 0 && gi < zoneGroups.length - 1) {
+        const prevGroup = mergedGroups[mergedGroups.length - 1];
+        const nextGroup = zoneGroups[gi + 1];
+        if (prevGroup.type === 'fullWidth' && nextGroup.type === 'fullWidth') {
+          const totalElements = group.zones.reduce((sum, z) => sum + z.elements.length, 0);
+          if (totalElements <= 2) {
+            for (const z of group.zones) prevGroup.zones.push(z);
+            continue;
+          }
+        }
+      }
+
+      if (mergedGroups.length > 0 && mergedGroups[mergedGroups.length - 1].type === group.type) {
+        mergedGroups[mergedGroups.length - 1].zones.push(...group.zones);
+      } else {
+        mergedGroups.push({ type: group.type, zones: [...group.zones] });
+      }
+    }
+
+    for (const group of mergedGroups) {
+      const useFullWidth = group.type === 'fullWidth';
+      const colCount = useFullWidth ? 1 : pageColCount;
+      const elements = [];
+      for (const zone of group.zones) {
+        for (const el of zone.elements) {
+          elements.push({ ...el, _sourcePageIndex: page.pageIndex, _zoneType: zone.type });
+        }
+      }
+      if (!useFullWidth && pageColCount > 1 && layout.columns) {
+        sortElementsColumnFirst(elements, layout.columns.gapCenter);
+      }
+      segments.push({
+        columnCount: colCount,
+        elements,
+        pageIndex: page.pageIndex,
+        isFirstPage: page.pageIndex === 0 && segments.length === 0,
+        isLastPage: page.pageIndex === pages.length - 1,
+      });
+    }
   }
 
-  return segments;
+  const merged = [];
+  for (const seg of segments) {
+    if (merged.length > 0) {
+      const prev = merged[merged.length - 1];
+      if (prev.columnCount === seg.columnCount && prev.columnCount > 1
+          && seg.pageIndex === prev.pageIndex + 1) {
+        prev.elements.push(...seg.elements);
+        prev.isLastPage = seg.isLastPage;
+        continue;
+      }
+    }
+    merged.push({ ...seg, elements: [...seg.elements] });
+  }
+
+  for (const seg of merged) {
+    if (seg.columnCount > 1) {
+      const page = pages[seg.pageIndex];
+      if (page && page.layout && page.layout.columns) {
+        sortElementsColumnFirst(seg.elements, page.layout.columns.gapCenter);
+      }
+    }
+  }
+
+  return merged;
 }
 
 function buildSectionsFromSegments(segments, pages, headerFooter, pageMargins, bodySize, typographyContext) {
@@ -246,6 +337,13 @@ function buildSectionsFromSegments(segments, pages, headerFooter, pageMargins, b
       },
       children,
     };
+
+    if (segIdx > 0) {
+      const prevSeg = segments[segIdx - 1];
+      if (prevSeg.pageIndex === segment.pageIndex && prevSeg.columnCount !== segment.columnCount) {
+        sectionConfig.properties.type = SectionType.CONTINUOUS;
+      }
+    }
 
     if (segment.columnCount > 1) {
       const layout = page.layout;

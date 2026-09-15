@@ -101,7 +101,7 @@ function detectColumns(textItems, pageWidth, contentBounds) {
     };
   }
 
-  const leftMaxX = Math.max(...leftItems.map(i => i.x));
+  const leftMaxX = Math.max(...leftItems.map(i => i.x + (i.width || 0)));
   const rightMinX = Math.min(...rightItems.map(i => i.x));
   const gap = rightMinX - leftMaxX;
 
